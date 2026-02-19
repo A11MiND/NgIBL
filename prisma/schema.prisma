@@ -1,0 +1,130 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  name      String?
+  createdAt DateTime @default(now())
+  
+  experiments Experiment[]
+  simulations Simulation[]
+  geminiApiKey  String?
+  deepseekApiKey String?
+  qwenApiKey     String?
+  ollamaBaseUrl  String?  // default http://localhost:11434
+  preferredProvider String? // gemini | deepseek | qwen | ollama
+  defaultModel   String?  // e.g. deepseek-chat, qwen-plus, gemini-1.5-flash
+
+  // Per-function model overrides
+  simulationModel String?  // Model for AI simulation generation
+  chatbotModel    String?  // Model for student AI tutor chatbot
+  analysisModel   String?  // Model for analysing student submissions
+}
+
+model Experiment {
+  id             String   @id @default(uuid())
+  title          String
+  slug           String   @unique
+  description    String?
+  subject        String
+  isPublished    Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  aiContext      String?  // For RAG
+  aiModel        String   @default("gemini")
+  systemPrompt   String?
+  temperature    Float    @default(0.7)
+  allowImageUpload Boolean @default(false)
+
+  userId         String?
+  user           User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  simulationId   String?
+  simulation     Simulation? @relation(fields: [simulationId], references: [id])
+
+  questions      WorksheetQuestion[]
+  submissions    StudentSubmission[]
+}
+
+model WorksheetQuestion {
+  id          String   @id @default(uuid())
+  experimentId String
+  experiment   Experiment @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+  type        String   // MCQ, SHORT, LONG, FILL_IN
+  question    String
+  options     Json?    // For MCQ options: ["Option A", "Option B"]
+  order       Int      @default(0)
+  
+  answers     Answer[]
+}
+
+model StudentSubmission {
+  id           String   @id @default(uuid())
+  experimentId String
+  experiment   Experiment @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+  studentName  String
+  studentId    String
+  class        String
+  submittedAt  DateTime @default(now())
+  
+  answers      Answer[]
+}
+
+model Answer {
+  id           String   @id @default(uuid())
+  submissionId String
+  submission   StudentSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  questionId   String
+  question     WorksheetQuestion @relation(fields: [questionId], references: [id])
+  value        String
+}
+
+model Simulation {
+  id          String   @id @default(uuid())
+  title       String
+  description String?
+  subject     String   // Physics, Chemistry, Biology, Math
+  
+  // Type & Content
+  type        String   // "REACT" | "GEOGEBRA_FILE" | "GEOGEBRA_API"
+  reactCode   String?  // JSX code for React sims
+  geogebraFile String? // URL to .ggb file (Vercel Blob)
+  geogebraMaterialId String? // geogebra.org material ID
+  geogebraCommands Json? // AI-generated commands array
+  geogebraSettings Json? // API config (width, height, toolbar)
+  
+  // Metadata
+  variables   Json?    // AI-detected variables [{name, type, min, max}]
+  thumbnail   String?  // Preview image URL
+  
+  // Community
+  isPublic    Boolean  @default(false)
+  isTemplate  Boolean  @default(false) // Migrated prebuilts
+  views       Int      @default(0)
+  forks       Int      @default(0)
+  parentId    String?  // For forked simulations
+  parent      Simulation? @relation("SimulationForks", fields: [parentId], references: [id])
+  children    Simulation[] @relation("SimulationForks")
+  
+  // Version Control
+  versionHistory Json? // [{version, code, timestamp, changes}]
+  
+  // Relations
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  experiments Experiment[]
+}
