@@ -8,6 +8,7 @@ import { AIProvider } from '@/lib/ai'
 export async function analyzeAnswersAction(experimentId: string): Promise<{
   success: boolean
   analysis?: string
+  chartData?: Array<{ question: string; correctPct: number; partialPct: number; incorrectPct: number }>
   error?: string
 }> {
   const session = await auth()

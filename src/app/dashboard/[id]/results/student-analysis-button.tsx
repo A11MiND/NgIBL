@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { Loader2, Brain, X, User } from "lucide-react"
 import { analyzeStudentAction } from "./actions"
 
@@ -48,8 +49,8 @@ export function StudentAnalysisButton({
 
       {open && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setOpen(false)}>
-          <Card className="w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
-            <CardHeader className="pb-3 flex flex-row items-center justify-between shrink-0">
+          <Card className="w-full max-w-3xl max-h-[85vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+            <CardHeader className="pb-3 flex flex-row items-center justify-between shrink-0 border-b">
               <CardTitle className="text-lg flex items-center gap-2">
                 <User className="h-5 w-5 text-purple-500" />
                 {studentName} — {dict.results?.studentAnalysis || "Student Analysis"}
@@ -58,21 +59,23 @@ export function StudentAnalysisButton({
                 <X className="h-4 w-4" />
               </Button>
             </CardHeader>
-            <CardContent className="overflow-y-auto">
-              {loading && (
-                <div className="flex items-center gap-2 text-muted-foreground py-8 justify-center">
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                  <span>{dict.results?.analyzing || "Analyzing with AI..."}</span>
-                </div>
-              )}
-              {error && <p className="text-sm text-red-600">{error}</p>}
-              {analysis && (
-                <div
-                  className="prose prose-sm dark:prose-invert max-w-none"
-                  dangerouslySetInnerHTML={{ __html: formatMarkdown(analysis) }}
-                />
-              )}
-            </CardContent>
+            <ScrollArea className="flex-1 overflow-hidden">
+              <CardContent className="pt-4">
+                {loading && (
+                  <div className="flex items-center gap-2 text-muted-foreground py-8 justify-center">
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                    <span>{dict.results?.analyzing || "Analyzing with AI..."}</span>
+                  </div>
+                )}
+                {error && <p className="text-sm text-red-600">{error}</p>}
+                {analysis && (
+                  <div
+                    className="prose prose-sm dark:prose-invert max-w-none break-words"
+                    dangerouslySetInnerHTML={{ __html: formatMarkdown(analysis) }}
+                  />
+                )}
+              </CardContent>
+            </ScrollArea>
           </Card>
         </div>
       )}

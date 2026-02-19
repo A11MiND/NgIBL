@@ -351,7 +351,7 @@ export async function analyzeStudentAnswers(
   subject: string,
   apiKey: string,
   options: GenerateOptions = {}
-): Promise<{ success: boolean; analysis?: string; error?: string }> {
+): Promise<{ success: boolean; analysis?: string; chartData?: Array<{ question: string; correctPct: number; partialPct: number; incorrectPct: number }>; error?: string }> {
   try {
     const provider = options.provider || 'deepseek'
 
@@ -366,17 +366,41 @@ export async function analyzeStudentAnswers(
       messages: [
         {
           role: 'system',
-          content: `You are an expert education analyst. Analyze student responses to a ${subject} experiment. For EACH question, provide:
-1. **Common Correct Patterns** - frequent correct answer themes
-2. **Common Misconceptions** - frequent incorrect patterns and likely reasoning
-3. **Approximate Correctness** - rough percentage of students who seem to understand
-4. **Teaching Suggestions** - specific recommendations for the teacher
+          content: `You are an expert education analyst. Analyze student responses to a ${subject} experiment.
 
-Use markdown formatting. Be concise and actionable. Write in English.`
+You MUST return a JSON object with this EXACT structure (no markdown, no fences, ONLY JSON):
+{
+  "chartData": [
+    { "question": "Q1: <short question summary max 30 chars>", "correctPct": 70, "partialPct": 15, "incorrectPct": 15 },
+    { "question": "Q2: <short summary>", "correctPct": 50, "partialPct": 20, "incorrectPct": 30 }
+  ],
+  "analysis": "<markdown formatted analysis text>"
+}
+
+For the "chartData" array: one entry per question with estimated percentages (must sum to ~100).
+For the "analysis" string: For EACH question provide:
+1. **Common Correct Patterns** - frequent correct answer themes
+2. **Common Misconceptions** - frequent incorrect patterns and likely reasoning  
+3. **Teaching Suggestions** - specific recommendations
+
+Use markdown formatting in the analysis string. Be concise and actionable. Write in English.
+CRITICAL: Output ONLY the JSON object. No markdown fences. No text before or after.`
         },
         { role: 'user', content: qaText }
       ]
     })
+
+    // Try to parse structured JSON response
+    try {
+      const cleaned = result.replace(/```(?:json)?\s*\n?/g, '').replace(/\n?```\s*$/g, '').trim()
+      const parsed = JSON.parse(cleaned)
+      if (parsed.chartData && parsed.analysis) {
+        return { success: true, analysis: parsed.analysis, chartData: parsed.chartData }
+      }
+    } catch {
+      // AI didn't return valid JSON, fall back to raw text
+    }
+
     return { success: true, analysis: result }
   } catch (error: any) {
     return { success: false, error: error.message }
