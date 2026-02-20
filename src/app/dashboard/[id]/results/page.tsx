@@ -63,7 +63,7 @@ export default async function ResultsPage({ params }: { params: Promise<{ id: st
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-4">
           <Button variant="ghost" size="icon" asChild>
             <Link href="/dashboard">
@@ -71,7 +71,7 @@ export default async function ResultsPage({ params }: { params: Promise<{ id: st
             </Link>
           </Button>
           <div>
-            <h1 className="text-2xl font-bold">{experiment.title} - {dict.results.title}</h1>
+            <h1 className="text-xl sm:text-2xl font-bold">{experiment.title} - {dict.results.title}</h1>
             <p className="text-sm text-muted-foreground">{experiment.submissions.length} {dict.results.submissions}</p>
           </div>
         </div>
@@ -92,7 +92,7 @@ export default async function ResultsPage({ params }: { params: Promise<{ id: st
           <CardTitle>{dict.results.title}</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="rounded-md border">
+          <div className="rounded-md border overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>

@@ -102,17 +102,17 @@ export default function ExperimentEditor({ experiment, mySimulations, communityS
 
   return (
     <div className="space-y-6 pb-24">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" onClick={() => router.push("/dashboard")}>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-4 min-w-0">
+          <Button variant="ghost" size="icon" className="shrink-0" onClick={() => router.push("/dashboard")}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
-          <div>
-            <h1 className="text-2xl font-bold">{title}</h1>
+          <div className="min-w-0">
+            <h1 className="text-xl sm:text-2xl font-bold truncate">{title}</h1>
             <p className="text-sm text-muted-foreground">{dict.editor.title}</p>
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <Dialog>
             <DialogTrigger asChild>
               <Button variant="outline">
@@ -180,7 +180,7 @@ export default function ExperimentEditor({ experiment, mySimulations, communityS
               <div className="pt-4 border-t">
                 <h3 className="text-lg font-medium mb-4">{dict.editor.aiTutor}</h3>
                 <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label>{dict.editor.aiModelLabel}</Label>
                       <Select value={aiModel} onValueChange={setAiModel}>

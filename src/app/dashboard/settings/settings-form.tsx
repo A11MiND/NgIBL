@@ -250,7 +250,7 @@ export default function SettingsForm({ currentKeys, dict }: SettingsFormProps) {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Provider</Label>
               <Select value={preferredProvider} onValueChange={handleProviderChange}>
@@ -483,7 +483,7 @@ export default function SettingsForm({ currentKeys, dict }: SettingsFormProps) {
               onChange={(e) => setCurrentPassword(e.target.value)}
               placeholder="Current password"
             />
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Input
                 type="password"
                 value={newPassword}

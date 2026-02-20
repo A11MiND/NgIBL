@@ -23,6 +23,7 @@ import {
 import SimulationRunner from "@/components/simulation-runner"
 import { useRouter } from "next/navigation"
 import { useImageUpload } from "@/lib/use-image-upload"
+import { cn } from "@/lib/utils"
 import { ImagePreviewBar } from "@/components/image-preview-bar"
 
 interface Message {
@@ -505,10 +506,39 @@ export default function SandboxStudio({
   }
   
   // Chat + Preview Mode
+  const [mobileTab, setMobileTab] = useState<'chat' | 'preview'>('chat')
+  
   return (
-    <div className="flex -mx-8 -mt-8 -mb-8" style={{ height: 'calc(100vh - 64px)' }}>
+    <div className="flex flex-col md:flex-row -mx-4 md:-mx-8 -mt-8 -mb-8" style={{ height: 'calc(100vh - 64px)' }}>
+      {/* Mobile tab switcher */}
+      <div className="flex md:hidden border-b bg-background shrink-0">
+        <button
+          onClick={() => setMobileTab('chat')}
+          className={cn(
+            "flex-1 py-2.5 text-sm font-medium text-center border-b-2 transition-colors",
+            mobileTab === 'chat' ? "border-primary text-primary" : "border-transparent text-muted-foreground"
+          )}
+        >
+          <Sparkles className="h-4 w-4 inline mr-1" />
+          AI Studio
+        </button>
+        <button
+          onClick={() => setMobileTab('preview')}
+          className={cn(
+            "flex-1 py-2.5 text-sm font-medium text-center border-b-2 transition-colors",
+            mobileTab === 'preview' ? "border-primary text-primary" : "border-transparent text-muted-foreground"
+          )}
+        >
+          <Eye className="h-4 w-4 inline mr-1" />
+          Preview
+        </button>
+      </div>
+      
       {/* Left: Chat Panel */}
-      <div className="w-[380px] min-w-[320px] border-r flex flex-col bg-muted/30">
+      <div className={cn(
+        "w-full md:w-[380px] md:min-w-[320px] border-r flex flex-col bg-muted/30 flex-1 md:flex-initial",
+        mobileTab !== 'chat' && "hidden md:flex"
+      )}>
         <div className="p-3 border-b bg-background flex items-center justify-between">
           <div>
             <h2 className="font-semibold flex items-center gap-2 text-sm">
@@ -713,7 +743,10 @@ export default function SandboxStudio({
       </div>
       
       {/* Right: Preview */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className={cn(
+        "flex-1 flex flex-col min-w-0",
+        mobileTab !== 'preview' && "hidden md:flex"
+      )}>
         <Tabs defaultValue="preview" className="flex-1 flex flex-col">
           <div className="border-b px-4">
             <TabsList>

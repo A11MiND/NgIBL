@@ -22,7 +22,7 @@ export default function RegisterPage() {
   }, [state, router])
  
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50">
+    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
       <Card className="w-full max-w-md">
         <CardHeader>
           <CardTitle>Teacher Registration</CardTitle>

@@ -2,12 +2,22 @@
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [vector]
+}
+
+// ─── RBAC ───────────────────────────────────────────────────────────
+
+enum Role {
+  STUDENT
+  TEACHER
+  ADMIN
 }
 
 model User {
@@ -15,6 +25,7 @@ model User {
   email     String   @unique
   password  String
   name      String?
+  role      Role     @default(TEACHER)
   createdAt DateTime @default(now())
   
   experiments Experiment[]
@@ -30,6 +41,13 @@ model User {
   simulationModel String?  // Model for AI simulation generation
   chatbotModel    String?  // Model for student AI tutor chatbot
   analysisModel   String?  // Model for analysing student submissions
+
+  // Audit trail
+  auditLogs  AuditLog[]
+
+  @@index([email])
+  @@index([role])
+  @@index([createdAt])
 }
 
 model Experiment {
@@ -55,6 +73,12 @@ model Experiment {
 
   questions      WorksheetQuestion[]
   submissions    StudentSubmission[]
+  embeddings     Embedding[]
+
+  @@index([userId, createdAt])
+  @@index([subject])
+  @@index([isPublished])
+  @@index([slug])
 }
 
 model WorksheetQuestion {
@@ -67,6 +91,8 @@ model WorksheetQuestion {
   order       Int      @default(0)
   
   answers     Answer[]
+
+  @@index([experimentId, order])
 }
 
 model StudentSubmission {
@@ -79,6 +105,9 @@ model StudentSubmission {
   submittedAt  DateTime @default(now())
   
   answers      Answer[]
+
+  @@index([experimentId, submittedAt])
+  @@index([studentId])
 }
 
 model Answer {
@@ -88,6 +117,9 @@ model Answer {
   questionId   String
   question     WorksheetQuestion @relation(fields: [questionId], references: [id])
   value        String
+
+  @@index([submissionId])
+  @@index([questionId])
 }
 
 model Simulation {
@@ -127,4 +159,39 @@ model Simulation {
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   
   experiments Experiment[]
+
+  @@index([userId, createdAt])
+  @@index([isPublic])
+  @@index([subject])
+}
+
+// ─── RAG: Vector Embeddings ─────────────────────────────────────────
+
+model Embedding {
+  id           String   @id @default(uuid())
+  experimentId String
+  experiment   Experiment @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+  chunkText    String
+  chunkIndex   Int
+  embedding    Unsupported("vector(768)")?
+  metadata     Json?
+  createdAt    DateTime @default(now())
+
+  @@index([experimentId])
+}
+
+// ─── Audit Logging ──────────────────────────────────────────────────
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  action    String   // CREATE, UPDATE, DELETE, LOGIN, etc.
+  entity    String   // Experiment, Simulation, etc.
+  entityId  String?
+  metadata  Json?    // Additional context
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([entity, action])
 }

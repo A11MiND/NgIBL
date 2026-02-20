@@ -136,7 +136,7 @@ export default function CommunityGrid({
           </div>
           
           <Select value={subject} onValueChange={handleSubjectChange}>
-            <SelectTrigger className="w-[180px]">
+            <SelectTrigger className="w-full sm:w-[180px]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -149,7 +149,7 @@ export default function CommunityGrid({
           </Select>
           
           <Select value={sort} onValueChange={handleSortChange}>
-            <SelectTrigger className="w-[180px]">
+            <SelectTrigger className="w-full sm:w-[180px]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

@@ -1,0 +1,19 @@
+{
+  "functions": {
+    "src/app/api/**/*.ts": {
+      "maxDuration": 60
+    },
+    "src/app/sandbox/actions.ts": {
+      "maxDuration": 60
+    },
+    "src/app/experiment/[slug]/actions.ts": {
+      "maxDuration": 60
+    },
+    "src/app/dashboard/[id]/results/actions.ts": {
+      "maxDuration": 60
+    },
+    "src/app/dashboard/[id]/edit/actions.ts": {
+      "maxDuration": 60
+    }
+  }
+}

@@ -1,16 +1,18 @@
 import { NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
+import { withApiErrorHandling } from "@/lib/error-handler"
+import { logger } from "@/lib/logger"
+import { cacheDelete, CacheKeys } from "@/lib/cache"
 
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  try {
+  return withApiErrorHandling('POST /api/experiments/[id]/submit', async () => {
     const { id } = await params
     const body = await request.json()
     const { student, answers } = body
 
-    // Create submission
     const submission = await prisma.studentSubmission.create({
       data: {
         experimentId: id,
@@ -26,12 +28,11 @@ export async function POST(
       }
     })
 
+    // Invalidate class analysis cache (new submission changes the data)
+    await cacheDelete(CacheKeys.classAnalysis(id))
+
+    logger.info({ experimentId: id, submissionId: submission.id, studentName: student.name }, 'Student submission received')
+
     return NextResponse.json(submission)
-  } catch (error) {
-    console.error("Error submitting worksheet:", error)
-    return NextResponse.json(
-      { error: "Failed to submit worksheet" },
-      { status: 500 }
-    )
-  }
+  })
 }

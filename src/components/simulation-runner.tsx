@@ -13,6 +13,66 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "./ui/
 import { Input } from "./ui/input"
 import { Label } from "./ui/label"
 
+// Common science data that AI-generated simulations may reference
+const ELEMENTS = [
+  { symbol: "H", name: "Hydrogen", number: 1, mass: 1.008, category: "nonmetal", color: "#FFFFFF", electronConfig: "1s1", electronegativity: 2.20, radius: 53 },
+  { symbol: "He", name: "Helium", number: 2, mass: 4.003, category: "noble gas", color: "#D9FFFF", electronConfig: "1s2", electronegativity: 0, radius: 31 },
+  { symbol: "Li", name: "Lithium", number: 3, mass: 6.941, category: "alkali metal", color: "#CC80FF", electronConfig: "[He]2s1", electronegativity: 0.98, radius: 167 },
+  { symbol: "Be", name: "Beryllium", number: 4, mass: 9.012, category: "alkaline earth", color: "#C2FF00", electronConfig: "[He]2s2", electronegativity: 1.57, radius: 112 },
+  { symbol: "B", name: "Boron", number: 5, mass: 10.81, category: "metalloid", color: "#FFB5B5", electronConfig: "[He]2s2 2p1", electronegativity: 2.04, radius: 87 },
+  { symbol: "C", name: "Carbon", number: 6, mass: 12.011, category: "nonmetal", color: "#909090", electronConfig: "[He]2s2 2p2", electronegativity: 2.55, radius: 77 },
+  { symbol: "N", name: "Nitrogen", number: 7, mass: 14.007, category: "nonmetal", color: "#3050F8", electronConfig: "[He]2s2 2p3", electronegativity: 3.04, radius: 75 },
+  { symbol: "O", name: "Oxygen", number: 8, mass: 15.999, category: "nonmetal", color: "#FF0D0D", electronConfig: "[He]2s2 2p4", electronegativity: 3.44, radius: 73 },
+  { symbol: "F", name: "Fluorine", number: 9, mass: 18.998, category: "halogen", color: "#90E050", electronConfig: "[He]2s2 2p5", electronegativity: 3.98, radius: 71 },
+  { symbol: "Ne", name: "Neon", number: 10, mass: 20.180, category: "noble gas", color: "#B3E3F5", electronConfig: "[He]2s2 2p6", electronegativity: 0, radius: 38 },
+  { symbol: "Na", name: "Sodium", number: 11, mass: 22.990, category: "alkali metal", color: "#AB5CF2", electronConfig: "[Ne]3s1", electronegativity: 0.93, radius: 190 },
+  { symbol: "Mg", name: "Magnesium", number: 12, mass: 24.305, category: "alkaline earth", color: "#8AFF00", electronConfig: "[Ne]3s2", electronegativity: 1.31, radius: 145 },
+  { symbol: "Al", name: "Aluminum", number: 13, mass: 26.982, category: "post-transition", color: "#BFA6A6", electronConfig: "[Ne]3s2 3p1", electronegativity: 1.61, radius: 118 },
+  { symbol: "Si", name: "Silicon", number: 14, mass: 28.086, category: "metalloid", color: "#F0C8A0", electronConfig: "[Ne]3s2 3p2", electronegativity: 1.90, radius: 111 },
+  { symbol: "P", name: "Phosphorus", number: 15, mass: 30.974, category: "nonmetal", color: "#FF8000", electronConfig: "[Ne]3s2 3p3", electronegativity: 2.19, radius: 106 },
+  { symbol: "S", name: "Sulfur", number: 16, mass: 32.065, category: "nonmetal", color: "#FFFF30", electronConfig: "[Ne]3s2 3p4", electronegativity: 2.58, radius: 102 },
+  { symbol: "Cl", name: "Chlorine", number: 17, mass: 35.453, category: "halogen", color: "#1FF01F", electronConfig: "[Ne]3s2 3p5", electronegativity: 3.16, radius: 99 },
+  { symbol: "Ar", name: "Argon", number: 18, mass: 39.948, category: "noble gas", color: "#80D1E3", electronConfig: "[Ne]3s2 3p6", electronegativity: 0, radius: 71 },
+  { symbol: "K", name: "Potassium", number: 19, mass: 39.098, category: "alkali metal", color: "#8F40D4", electronConfig: "[Ar]4s1", electronegativity: 0.82, radius: 243 },
+  { symbol: "Ca", name: "Calcium", number: 20, mass: 40.078, category: "alkaline earth", color: "#3DFF00", electronConfig: "[Ar]4s2", electronegativity: 1.00, radius: 194 },
+  { symbol: "Fe", name: "Iron", number: 26, mass: 55.845, category: "transition metal", color: "#E06633", electronConfig: "[Ar]3d6 4s2", electronegativity: 1.83, radius: 156 },
+  { symbol: "Cu", name: "Copper", number: 29, mass: 63.546, category: "transition metal", color: "#C88033", electronConfig: "[Ar]3d10 4s1", electronegativity: 1.90, radius: 140 },
+  { symbol: "Zn", name: "Zinc", number: 30, mass: 65.38, category: "transition metal", color: "#7D80B0", electronConfig: "[Ar]3d10 4s2", electronegativity: 1.65, radius: 139 },
+  { symbol: "Br", name: "Bromine", number: 35, mass: 79.904, category: "halogen", color: "#A62929", electronConfig: "[Ar]3d10 4s2 4p5", electronegativity: 2.96, radius: 114 },
+  { symbol: "Ag", name: "Silver", number: 47, mass: 107.868, category: "transition metal", color: "#C0C0C0", electronConfig: "[Kr]4d10 5s1", electronegativity: 1.93, radius: 165 },
+  { symbol: "I", name: "Iodine", number: 53, mass: 126.904, category: "halogen", color: "#940094", electronConfig: "[Kr]4d10 5s2 5p5", electronegativity: 2.66, radius: 133 },
+  { symbol: "Au", name: "Gold", number: 79, mass: 196.967, category: "transition metal", color: "#FFD123", electronConfig: "[Xe]4f14 5d10 6s1", electronegativity: 2.54, radius: 174 },
+]
+
+const PHYSICS_CONSTANTS = {
+  g: 9.81, G: 6.674e-11, c: 299792458, h: 6.626e-34, k: 1.381e-23,
+  e: 1.602e-19, me: 9.109e-31, mp: 1.673e-27, Na: 6.022e23, R: 8.314,
+  epsilon0: 8.854e-12, mu0: 1.257e-6, sigma: 5.670e-8, pi: Math.PI,
+}
+
+const AMINO_ACIDS = [
+  { symbol: "A", code: "Ala", name: "Alanine", type: "nonpolar" },
+  { symbol: "R", code: "Arg", name: "Arginine", type: "positive" },
+  { symbol: "N", code: "Asn", name: "Asparagine", type: "polar" },
+  { symbol: "D", code: "Asp", name: "Aspartic acid", type: "negative" },
+  { symbol: "C", code: "Cys", name: "Cysteine", type: "polar" },
+  { symbol: "E", code: "Glu", name: "Glutamic acid", type: "negative" },
+  { symbol: "Q", code: "Gln", name: "Glutamine", type: "polar" },
+  { symbol: "G", code: "Gly", name: "Glycine", type: "nonpolar" },
+  { symbol: "H", code: "His", name: "Histidine", type: "positive" },
+  { symbol: "I", code: "Ile", name: "Isoleucine", type: "nonpolar" },
+  { symbol: "L", code: "Leu", name: "Leucine", type: "nonpolar" },
+  { symbol: "K", code: "Lys", name: "Lysine", type: "positive" },
+  { symbol: "M", code: "Met", name: "Methionine", type: "nonpolar" },
+  { symbol: "F", code: "Phe", name: "Phenylalanine", type: "nonpolar" },
+  { symbol: "P", code: "Pro", name: "Proline", type: "nonpolar" },
+  { symbol: "S", code: "Ser", name: "Serine", type: "polar" },
+  { symbol: "T", code: "Thr", name: "Threonine", type: "polar" },
+  { symbol: "W", code: "Trp", name: "Tryptophan", type: "nonpolar" },
+  { symbol: "Y", code: "Tyr", name: "Tyrosine", type: "polar" },
+  { symbol: "V", code: "Val", name: "Valine", type: "nonpolar" },
+]
+
 // Simple Slider shim (plain HTML range input)
 const Slider = ({ value, onValueChange, min = 0, max = 100, step = 1, className = '', ...props }: any) => {
   const val = Array.isArray(value) ? value[0] : value
@@ -206,6 +266,15 @@ function ReactRunner({ code, onError }: { code: string; onError?: (error: string
       cancelAnimationFrame: typeof window !== 'undefined' ? window.cancelAnimationFrame : () => {},
       document: typeof document !== 'undefined' ? document : undefined,
       window: typeof window !== 'undefined' ? window : undefined,
+
+      // Science data constants (used by AI-generated simulations)
+      ELEMENTS,
+      PHYSICS_CONSTANTS,
+      AMINO_ACIDS,
+      elements: ELEMENTS,           // lowercase alias
+      periodicTable: ELEMENTS,      // common alias
+      physicsConstants: PHYSICS_CONSTANTS,
+      aminoAcids: AMINO_ACIDS,
     }
     return s
   }, [])
@@ -268,10 +337,12 @@ function GeoGebraFileRunner({ fileUrl, settings }: { fileUrl: string; settings?:
     loadGeoGebraScript().then(() => {
       if (cancelled || !containerRef.current) return
       
+      const containerWidth = containerRef.current?.clientWidth || 800
+      const containerHeight = containerRef.current?.clientHeight || 600
       const params = {
         filename: fileUrl,
-        width: settings?.width || 800,
-        height: settings?.height || 600,
+        width: settings?.width || containerWidth,
+        height: settings?.height || containerHeight,
         showToolBar: settings?.showToolBar ?? false,
         showAlgebraInput: settings?.showAlgebraInput ?? false,
         showMenuBar: settings?.showMenuBar ?? false,
@@ -311,10 +382,12 @@ function GeoGebraAPIRunner({ commands, settings }: { commands?: any; settings?: 
         
         const containerId = appletId.current
 
+        const containerWidth = containerRef.current?.clientWidth || 800
+        const containerHeight = containerRef.current?.clientHeight || 600
         const params = {
           appName: "classic",
-          width: geoSettings.width || 800,
-          height: geoSettings.height || 600,
+          width: geoSettings.width || containerWidth,
+          height: geoSettings.height || containerHeight,
           showToolBar: geoSettings.showToolBar ?? false,
           showAlgebraInput: geoSettings.showAlgebraInput ?? true,
           showMenuBar: geoSettings.showMenuBar ?? false,

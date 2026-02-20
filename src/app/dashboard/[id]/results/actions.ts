@@ -4,6 +4,9 @@ import { auth } from '@/auth'
 import { prisma } from '@/lib/prisma'
 import { analyzeStudentAnswers, analyzeIndividualStudent } from '@/lib/ai-simulation'
 import { AIProvider } from '@/lib/ai'
+import { cached, cacheDelete, CacheKeys } from '@/lib/cache'
+import { rateLimit } from '@/lib/rate-limit'
+import { logger, logAI } from '@/lib/logger'
 
 export async function analyzeAnswersAction(experimentId: string): Promise<{
   success: boolean
@@ -44,6 +47,23 @@ export async function analyzeAnswersAction(experimentId: string): Promise<{
   if (!experiment) return { success: false, error: 'Experiment not found' }
   if (experiment.userId !== user.id) return { success: false, error: 'Not authorized' }
   if (experiment.submissions.length === 0) return { success: false, error: 'No submissions to analyze' }
+
+  // ─── Rate Limiting ──────────────────────────────────────────────
+  const rateLimitResult = await rateLimit(user.id, 'analysis')
+  if (!rateLimitResult.success) {
+    return { success: false, error: `Rate limit exceeded. Please wait before requesting another analysis. (${rateLimitResult.remaining} remaining)` }
+  }
+
+  // ─── Check Cache ────────────────────────────────────────────────
+  const cacheKey = CacheKeys.classAnalysis(experimentId)
+  const cachedResult = await (await import('@/lib/cache')).cacheGet<{
+    analysis: string
+    chartData?: Array<{ question: string; correctPct: number; partialPct: number; incorrectPct: number }>
+  }>(cacheKey)
+  if (cachedResult) {
+    logger.info({ experimentId, cached: true }, 'Class analysis served from cache')
+    return { success: true, ...cachedResult }
+  }
 
   // Resolve API key & model (analysisModel override > defaultModel)
   const preferred = (user.preferredProvider || 'deepseek') as AIProvider
@@ -87,12 +107,28 @@ export async function analyzeAnswersAction(experimentId: string): Promise<{
     })
   }))
 
-  return analyzeStudentAnswers(
+  const startTime = Date.now()
+  const result = await analyzeStudentAnswers(
     questionsAndAnswers,
     experiment.subject,
     apiKey,
     { provider, ollamaBaseUrl, model }
   )
+
+  logAI('class_analysis', {
+    provider,
+    model,
+    duration: Date.now() - startTime,
+    cached: false,
+  })
+
+  // Cache the result for 1 hour
+  if (result.success && result.analysis) {
+    const { cacheSet } = await import('@/lib/cache')
+    cacheSet(cacheKey, { analysis: result.analysis, chartData: result.chartData }, 3600).catch(() => {})
+  }
+
+  return result
 }
 
 export async function analyzeStudentAction(
@@ -134,6 +170,20 @@ export async function analyzeStudentAction(
 
   const submission = experiment.submissions.find(s => s.id === submissionId)
   if (!submission) return { success: false, error: 'Submission not found' }
+
+  // ─── Rate Limiting ──────────────────────────────────────────────
+  const rateLimitResult = await rateLimit(user.id, 'analysis')
+  if (!rateLimitResult.success) {
+    return { success: false, error: `Rate limit exceeded. Please wait before requesting another analysis.` }
+  }
+
+  // ─── Check Cache ────────────────────────────────────────────────
+  const studentCacheKey = CacheKeys.studentAnalysis(experimentId, submissionId)
+  const cachedStudent = await (await import('@/lib/cache')).cacheGet<{ analysis: string }>(studentCacheKey)
+  if (cachedStudent) {
+    logger.info({ experimentId, submissionId, cached: true }, 'Student analysis served from cache')
+    return { success: true, analysis: cachedStudent.analysis }
+  }
 
   // Resolve API key & model (analysisModel override > defaultModel)
   const preferred = (user.preferredProvider || 'deepseek') as AIProvider
@@ -181,11 +231,27 @@ export async function analyzeStudentAction(
     }
   })
 
-  return analyzeIndividualStudent(
+  const studentStartTime = Date.now()
+  const studentResult = await analyzeIndividualStudent(
     submission.studentName,
     studentAnswers,
     experiment.subject,
     apiKey,
     { provider, ollamaBaseUrl, model }
   )
+
+  logAI('student_analysis', {
+    provider,
+    model,
+    duration: Date.now() - studentStartTime,
+    cached: false,
+  })
+
+  // Cache the result for 1 hour
+  if (studentResult.success && studentResult.analysis) {
+    const { cacheSet } = await import('@/lib/cache')
+    cacheSet(studentCacheKey, { analysis: studentResult.analysis }, 3600).catch(() => {})
+  }
+
+  return studentResult
 }

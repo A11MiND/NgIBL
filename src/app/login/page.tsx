@@ -57,7 +57,7 @@ export default function LoginPage() {
   const [errorMessage, dispatch] = useActionState(authenticate, undefined)
  
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50 relative overflow-hidden">
+    <div className="flex min-h-screen items-center justify-center bg-gray-50 relative overflow-hidden px-4">
       <RainingSymbols />
       <Card className="w-full max-w-md z-10 bg-white/90 backdrop-blur-sm">
         <CardHeader>

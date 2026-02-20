@@ -2,6 +2,9 @@
 
 import { prisma } from "@/lib/prisma"
 import { generateContent, AIProvider } from "@/lib/ai"
+import { getRAGContext } from "@/lib/rag"
+import { rateLimit } from "@/lib/rate-limit"
+import { logger, logAI } from "@/lib/logger"
 
 export async function chatWithTutor(
   experimentId: string,
@@ -9,6 +12,8 @@ export async function chatWithTutor(
   history: { role: string; content: string }[],
   images?: string[]
 ) {
+  const startTime = Date.now()
+
   const experiment = await prisma.experiment.findUnique({
     where: { id: experimentId },
     include: { user: true }
@@ -20,6 +25,12 @@ export async function chatWithTutor(
 
   const user = experiment.user as any
   const hasImages = images && images.length > 0
+
+  // ─── Rate Limiting ──────────────────────────────────────────────
+  const rateLimitResult = await rateLimit(user.id, 'chatbot')
+  if (!rateLimitResult.success) {
+    return `You're sending messages too quickly. Please wait ${Math.ceil((rateLimitResult.resetAt.getTime() - Date.now()) / 1000)}s before trying again. (${rateLimitResult.remaining} remaining)`
+  }
 
   // Use per-function chatbotModel override > experiment aiModel > default
   let baseModel = (user.chatbotModel || experiment.aiModel) as string
@@ -78,7 +89,18 @@ export async function chatWithTutor(
     return "I'm sorry, but the AI tutor is not configured for this experiment yet. Please ask your teacher to set up the API keys."
   }
 
-  const knowledge = experiment.aiContext || ""
+  // ─── RAG: Semantic search for relevant context ──────────────────
+  const knowledge = await getRAGContext(
+    experimentId,
+    message,
+    experiment.aiContext,
+    {
+      provider: provider === 'ollama' ? 'ollama' : (user.geminiApiKey ? 'gemini' : undefined),
+      apiKey: user.geminiApiKey || effectiveApiKey!,
+      ollamaBaseUrl: user.ollamaBaseUrl,
+    }
+  )
+
   const systemInstructions = experiment.systemPrompt || "You are a helpful science tutor. You must only answer questions related to the experiment. Do not help students with their homework directly. Do not reveal answers to the worksheet questions."
 
   const fullSystemPrompt = hasImages
@@ -98,9 +120,21 @@ export async function chatWithTutor(
       messages: messages,
       images: hasImages ? images : undefined,
     })
+
+    logAI('chatbot', {
+      provider,
+      model,
+      duration: Date.now() - startTime,
+    })
+
     return response
   } catch (error: any) {
-    console.error("Chat Error:", error)
+    logAI('chatbot', {
+      provider,
+      model,
+      duration: Date.now() - startTime,
+      error: error.message,
+    })
     return `Error: ${error.message || "Unknown error occurred"}`
   }
 }

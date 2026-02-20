@@ -79,7 +79,7 @@ export default function StudentChatbot({
       )}
 
       {isOpen && (
-        <Card className="fixed bottom-6 right-6 w-80 md:w-96 h-[500px] shadow-xl z-50 flex flex-col animate-in slide-in-from-bottom-10 fade-in">
+        <Card className="fixed bottom-0 right-0 sm:bottom-6 sm:right-6 w-full sm:w-80 md:w-96 h-[100dvh] sm:h-[min(500px,80dvh)] sm:rounded-lg rounded-none shadow-xl z-50 flex flex-col animate-in slide-in-from-bottom-10 fade-in">
           <CardHeader className="p-4 border-b flex flex-row items-center justify-between space-y-0 bg-primary text-primary-foreground rounded-t-lg">
             <div className="flex items-center gap-2">
               <Bot className="h-5 w-5" />

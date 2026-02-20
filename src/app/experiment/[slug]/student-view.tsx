@@ -76,7 +76,7 @@ export default function StudentView({ experiment }: { experiment: ExperimentWith
   }
 
   return (
-    <div className="flex h-screen flex-col md:flex-row overflow-hidden">
+    <div className="flex h-dvh flex-col md:flex-row overflow-hidden">
       {/* Left Panel: Simulation */}
       <div className="w-full md:w-1/2 h-1/2 md:h-full bg-gray-100 border-r overflow-auto relative">
         <div className="absolute inset-0">
