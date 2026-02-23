@@ -113,6 +113,9 @@ export default function SandboxStudio({
   const [versionHistory, setVersionHistory] = useState<VersionEntry[]>(initialSimulation?.versionHistory || [])
   const [showHistory, setShowHistory] = useState(false)
   
+  // Mobile responsive tab (chat vs preview)
+  const [mobileTab, setMobileTab] = useState<'chat' | 'preview'>('chat')
+  
   // Draft restoration
   const [hasDraft, setHasDraft] = useState(false)
   const draftKey = isEditing ? `${DRAFT_KEY_PREFIX}${initialSimulation!.id}` : `${DRAFT_KEY_PREFIX}new`
@@ -506,8 +509,6 @@ export default function SandboxStudio({
   }
   
   // Chat + Preview Mode
-  const [mobileTab, setMobileTab] = useState<'chat' | 'preview'>('chat')
-  
   return (
     <div className="flex flex-col md:flex-row -mx-4 md:-mx-8 -mt-8 -mb-8" style={{ height: 'calc(100vh - 64px)' }}>
       {/* Mobile tab switcher */}
