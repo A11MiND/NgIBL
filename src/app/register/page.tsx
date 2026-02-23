@@ -22,7 +22,7 @@ export default function RegisterPage() {
   }, [state, router])
  
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
+    <div className="flex min-h-screen items-center justify-center bg-gray-50 dark:bg-slate-950 px-4">
       <Card className="w-full max-w-md">
         <CardHeader>
           <CardTitle>Teacher Registration</CardTitle>
@@ -43,11 +43,11 @@ export default function RegisterPage() {
               <Input id="password" type="password" name="password" required minLength={6} />
             </div>
             <div className="flex items-center justify-between text-sm">
-              <Link href="/login" className="text-blue-600 hover:underline">
+              <Link href="/login" className="text-blue-600 dark:text-blue-400 hover:underline">
                 Already have an account? Login
               </Link>
             </div>
-            <div className="text-red-500 text-sm h-4">
+            <div className="text-red-500 dark:text-red-400 text-sm h-4">
               {state !== 'success' && state}
             </div>
             <RegisterButton />

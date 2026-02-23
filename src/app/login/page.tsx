@@ -57,9 +57,9 @@ export default function LoginPage() {
   const [errorMessage, dispatch] = useActionState(authenticate, undefined)
  
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50 relative overflow-hidden px-4">
+    <div className="flex min-h-screen items-center justify-center bg-gray-50 dark:bg-slate-950 relative overflow-hidden px-4">
       <RainingSymbols />
-      <Card className="w-full max-w-md z-10 bg-white/90 backdrop-blur-sm">
+      <Card className="w-full max-w-md z-10 bg-white/90 dark:bg-slate-800/95 backdrop-blur-sm border dark:border-slate-700">
         <CardHeader>
           <CardTitle>Teacher Login</CardTitle>
           <CardDescription>Enter your credentials to access the dashboard.</CardDescription>
@@ -75,11 +75,11 @@ export default function LoginPage() {
               <Input id="password" type="password" name="password" required />
             </div>
             <div className="flex items-center justify-between text-sm">
-              <Link href="/register" className="text-blue-600 hover:underline">
+              <Link href="/register" className="text-blue-600 dark:text-blue-400 hover:underline">
                 Don't have an account? Register
               </Link>
             </div>
-            <div className="text-red-500 text-sm h-4">{errorMessage}</div>
+            <div className="text-red-500 dark:text-red-400 text-sm h-4">{errorMessage}</div>
             <LoginButton />
           </form>
         </CardContent>
