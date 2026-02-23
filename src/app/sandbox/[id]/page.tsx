@@ -40,6 +40,7 @@ export default async function SandboxEditPage({ params }: { params: Promise<{ id
         type: simulation.type as 'REACT' | 'GEOGEBRA_API',
         code: simulation.reactCode || (simulation.geogebraCommands ? JSON.stringify(simulation.geogebraCommands) : ''),
         versionHistory: (simulation.versionHistory as any[]) || [],
+        chatHistory: (simulation.chatHistory as any[]) || null,
       }}
     />
   )

@@ -47,6 +47,7 @@ interface InitialSimulation {
   type: 'REACT' | 'GEOGEBRA_API'
   code: string
   versionHistory: VersionEntry[]
+  chatHistory?: Message[] | null
 }
 
 // Robust code cleaner - strips markdown fences, explanations, imports
@@ -88,7 +89,11 @@ export default function SandboxStudio({
   
   // Chat state
   const [messages, setMessages] = useState<Message[]>(
-    isEditing ? [{ role: 'system', content: `Editing: ${initialSimulation!.title}. Describe changes to refine.` }] : []
+    isEditing
+      ? (initialSimulation!.chatHistory?.length
+          ? (initialSimulation!.chatHistory as Message[])
+          : [{ role: 'system', content: `Editing: ${initialSimulation!.title}. Describe changes to refine.` }])
+      : []
   )
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -115,6 +120,9 @@ export default function SandboxStudio({
   
   // Mobile responsive tab (chat vs preview)
   const [mobileTab, setMobileTab] = useState<'chat' | 'preview'>('chat')
+  
+  // Paste-code mode
+  const [pastedCode, setPastedCode] = useState('')
   
   // Draft restoration
   const [hasDraft, setHasDraft] = useState(false)
@@ -180,6 +188,16 @@ export default function SandboxStudio({
     setHasDraft(false)
   }
   
+  // Load pasted code directly into editor (skip AI generation)
+  function handleLoadCode() {
+    const cleaned = cleanCode(pastedCode.trim())
+    if (!cleaned) return
+    setCurrentCode(cleaned)
+    setCurrentType('REACT')
+    setStep('chat')
+    setMessages([{ role: 'system', content: `📋 Loaded pasted code (${subject}). Describe what you'd like to change or improve.` }])
+  }
+
   // Handle initial generation
   async function handleGenerate() {
     if (!initialPrompt.trim() && imageUpload.pendingImages.length === 0) return
@@ -315,6 +333,7 @@ export default function SandboxStudio({
         isPublic: savePublic,
         simulationId: isEditing ? initialSimulation!.id : undefined,
         versionHistory: updatedHistory,
+        chatHistory: messages,
       }
       
       const result = await saveSimulationAction(data)
@@ -445,63 +464,98 @@ export default function SandboxStudio({
             </div>
             
             <div className="space-y-2">
-              <Label className="text-sm font-medium">Describe Your Simulation</Label>
-              <Textarea 
-                placeholder="E.g., Create a car collision simulation where two cars move toward each other. Show momentum conservation with sliders for mass and velocity."
-                value={initialPrompt}
-                onChange={(e) => setInitialPrompt(e.target.value)}
-                onPaste={imageUpload.handlePaste}
-                rows={4}
-                className="resize-none text-base"
-              />
-              <div className="flex items-center gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={imageUpload.triggerUpload}
-                  className="gap-1.5"
-                >
-                  <ImagePlus className="h-4 w-4" />
-                  Upload Image
-                </Button>
-                <input
-                  ref={imageUpload.inputRef}
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  multiple
-                  className="hidden"
-                  onChange={(e) => {
-                    if (e.target.files) imageUpload.addImages(e.target.files)
-                    e.target.value = ''
-                  }}
-                />
-                <p className="text-xs text-muted-foreground">
-                  Upload a textbook photo, diagram, or screenshot. Also supports paste (Ctrl+V).
-                </p>
-              </div>
-              <ImagePreviewBar images={imageUpload.pendingImages} onRemove={imageUpload.removeImage} />
+              <Tabs defaultValue="describe">
+                <TabsList className="w-full">
+                  <TabsTrigger value="describe" className="flex-1">
+                    <Sparkles className="h-4 w-4 mr-1.5" />
+                    Describe
+                  </TabsTrigger>
+                  <TabsTrigger value="paste" className="flex-1">
+                    <Code className="h-4 w-4 mr-1.5" />
+                    Paste Code
+                  </TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="describe" className="space-y-2 mt-3">
+                  <Textarea 
+                    placeholder="E.g., Create a car collision simulation where two cars move toward each other. Show momentum conservation with sliders for mass and velocity."
+                    value={initialPrompt}
+                    onChange={(e) => setInitialPrompt(e.target.value)}
+                    onPaste={imageUpload.handlePaste}
+                    rows={4}
+                    className="resize-none text-base"
+                  />
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={imageUpload.triggerUpload}
+                      className="gap-1.5"
+                    >
+                      <ImagePlus className="h-4 w-4" />
+                      Upload Image
+                    </Button>
+                    <input
+                      ref={imageUpload.inputRef}
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      multiple
+                      className="hidden"
+                      onChange={(e) => {
+                        if (e.target.files) imageUpload.addImages(e.target.files)
+                        e.target.value = ''
+                      }}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Upload a textbook photo, diagram, or screenshot. Also supports paste (Ctrl+V).
+                    </p>
+                  </div>
+                  <ImagePreviewBar images={imageUpload.pendingImages} onRemove={imageUpload.removeImage} />
+                  <Button 
+                    onClick={handleGenerate} 
+                    disabled={(!initialPrompt.trim() && imageUpload.pendingImages.length === 0) || loading}
+                    className="w-full h-12 text-base"
+                    size="lg"
+                  >
+                    {loading ? (
+                      <>
+                        <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                        Generating (may take 15-30s)...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="mr-2 h-5 w-5" />
+                        Generate Simulation
+                      </>
+                    )}
+                  </Button>
+                </TabsContent>
+
+                <TabsContent value="paste" className="space-y-3 mt-3">
+                  <p className="text-sm text-muted-foreground">
+                    Paste React/JSX code generated by ChatGPT, Claude, or any other AI. You can then refine it with follow-up prompts.
+                  </p>
+                  <Textarea
+                    placeholder={`// Paste your React simulation code here\nfunction Simulation() {\n  return <div>...</div>\n}\nexport default Simulation`}
+                    value={pastedCode}
+                    onChange={(e) => setPastedCode(e.target.value)}
+                    rows={8}
+                    className="resize-none font-mono text-sm"
+                  />
+                  <Button
+                    onClick={handleLoadCode}
+                    disabled={!pastedCode.trim()}
+                    className="w-full h-12 text-base"
+                    size="lg"
+                  >
+                    <Code className="mr-2 h-5 w-5" />
+                    Load Code into Studio
+                  </Button>
+                </TabsContent>
+              </Tabs>
             </div>
-            
-            <Button 
-              onClick={handleGenerate} 
-              disabled={(!initialPrompt.trim() && imageUpload.pendingImages.length === 0) || loading}
-              className="w-full h-12 text-base"
-              size="lg"
-            >
-              {loading ? (
-                <>
-                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                  Generating (may take 15-30s)...
-                </>
-              ) : (
-                <>
-                  <Sparkles className="mr-2 h-5 w-5" />
-                  Generate Simulation
-                </>
-              )}
-            </Button>
           </CardContent>
         </Card>
       </div>

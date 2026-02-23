@@ -202,6 +202,7 @@ export async function saveSimulationAction(data: {
   isPublic?: boolean
   simulationId?: string // For updates
   versionHistory?: any
+  chatHistory?: any
 }) {
   try {
     const session = await auth()
@@ -230,6 +231,7 @@ export async function saveSimulationAction(data: {
       variables: data.variables || null,
       isPublic: data.isPublic || false,
       versionHistory: data.versionHistory || null,
+      chatHistory: data.chatHistory || null,
       userId: user.id
     }
 

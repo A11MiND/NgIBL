@@ -6,7 +6,7 @@ export type AIProvider = 'gemini' | 'deepseek' | 'qwen' | 'ollama';
 
 // Base URLs for OpenAI-compatible providers
 const PROVIDER_URLS: Record<string, string> = {
-  deepseek: 'https://api.deepseek.com',
+  deepseek: 'https://api.deepseek.com/v1',
   qwen: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
 };
 

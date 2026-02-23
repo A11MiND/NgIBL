@@ -151,6 +151,7 @@ model Simulation {
   
   // Version Control
   versionHistory Json? // [{version, code, timestamp, changes}]
+  chatHistory    Json? // [{role, content, images?, timestamp?}]
   
   // Relations
   createdAt   DateTime @default(now())

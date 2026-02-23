@@ -33,7 +33,10 @@ const ALL_MODELS: { value: string; label: string; provider: string; vision?: boo
   { value: "deepseek-chat", label: "DeepSeek Chat (V3.2)", provider: "deepseek" },
   { value: "deepseek-reasoner", label: "DeepSeek Reasoner (Thinking)", provider: "deepseek" },
   // Qwen
-  { value: "qwen-max", label: "Qwen3 Max", provider: "qwen" },
+  { value: "qwen3.5-397b-a17b", label: "Qwen3.5 397B MoE (Flagship)", provider: "qwen" },
+  { value: "qwen3-235b-a22b", label: "Qwen3 235B MoE", provider: "qwen" },
+  { value: "qwen3-max", label: "Qwen3 Max", provider: "qwen" },
+  { value: "qwen-max", label: "Qwen Max (legacy)", provider: "qwen" },
   { value: "qwen-plus", label: "Qwen Plus (1M ctx)", provider: "qwen" },
   { value: "qwen-turbo", label: "Qwen Flash (1M ctx)", provider: "qwen" },
   { value: "qwen3-vl-plus", label: "Qwen3 VL Plus (Vision)", provider: "qwen", vision: true },
