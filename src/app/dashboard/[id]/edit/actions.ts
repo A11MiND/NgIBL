@@ -2,14 +2,17 @@
 
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
-import { generateContent, AIProvider } from "@/lib/ai"
+import { generateContent, AIProvider, inferProviderFromModel } from "@/lib/ai"
 
 /**
  * Resolve the AI provider, key, and model based on user settings.
- * If functionModel is set, use that; otherwise fall back to defaultModel.
+ * If functionModel is set, its provider is inferred from the model ID.
  */
 async function resolveAI(user: any, functionField?: string) {
-  const provider: AIProvider = user.preferredProvider || 'deepseek'
+  // Determine model first so we can infer provider from it
+  const model = (functionField && user[functionField]) || user.defaultModel || undefined
+  const inferredProvider = model ? inferProviderFromModel(model) : null
+  const provider: AIProvider = inferredProvider || (user.preferredProvider as AIProvider) || 'deepseek'
   let apiKey: string | undefined
   let ollamaBaseUrl: string | undefined
 
@@ -28,9 +31,6 @@ async function resolveAI(user: any, functionField?: string) {
       apiKey = ''
       break
   }
-
-  // Determine model: function-specific override > default model > provider default
-  const model = (functionField && user[functionField]) || user.defaultModel || undefined
 
   return { provider, apiKey: apiKey || '', model, ollamaBaseUrl }
 }

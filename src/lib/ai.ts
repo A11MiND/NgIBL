@@ -4,6 +4,19 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 
 export type AIProvider = 'gemini' | 'deepseek' | 'qwen' | 'ollama';
 
+/**
+ * Infer the AI provider from a model ID string.
+ * Allows per-function model overrides to automatically use the correct provider + API key.
+ */
+export function inferProviderFromModel(modelId: string): AIProvider | null {
+  if (!modelId) return null
+  const id = modelId.toLowerCase()
+  if (id.startsWith('deepseek')) return 'deepseek'
+  if (id.startsWith('qwen')) return 'qwen'
+  if (id.startsWith('gemini')) return 'gemini'
+  return null
+}
+
 // Base URLs for OpenAI-compatible providers
 const PROVIDER_URLS: Record<string, string> = {
   deepseek: 'https://api.deepseek.com/v1',

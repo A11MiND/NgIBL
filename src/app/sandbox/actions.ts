@@ -3,15 +3,18 @@
 import { auth } from '@/auth'
 import { prisma } from '@/lib/prisma'
 import { generateSimulation, refineSimulation, healSimulation, detectVariables, generateDescription } from '@/lib/ai-simulation'
-import { AIProvider } from '@/lib/ai'
+import { AIProvider, inferProviderFromModel } from '@/lib/ai'
 import { revalidatePath } from 'next/cache'
 
 /**
  * Resolve the user's preferred AI provider, API key, model, and function-specific override.
  */
 async function resolveProvider(user: any, functionField?: string): Promise<{ apiKey: string; provider: AIProvider; ollamaBaseUrl?: string; model?: string }> {
-  const preferred = user.preferredProvider || 'deepseek'
-  
+  // Resolve model first; infer provider from model ID if set
+  const model = (functionField && user[functionField]) || user.defaultModel || undefined
+  const inferredProvider = model ? inferProviderFromModel(model) : null
+  const preferred = inferredProvider || user.preferredProvider || 'deepseek'
+
   const resolvers: Record<string, () => { apiKey: string; provider: AIProvider; ollamaBaseUrl?: string } | null> = {
     deepseek: () => {
       const key = process.env.DEEPSEEK_API_KEY || user.deepseekApiKey
@@ -33,8 +36,6 @@ async function resolveProvider(user: any, functionField?: string): Promise<{ api
   // Try preferred first, then fallback
   const result = resolvers[preferred]?.()
   if (result) {
-    // Per-function model override > default model
-    const model = (functionField && user[functionField]) || user.defaultModel || undefined
     return { ...result, model }
   }
 
@@ -42,7 +43,6 @@ async function resolveProvider(user: any, functionField?: string): Promise<{ api
   for (const key of ['deepseek', 'qwen', 'gemini', 'ollama']) {
     const r = resolvers[key]?.()
     if (r) {
-      const model = (functionField && user[functionField]) || user.defaultModel || undefined
       return { ...r, model }
     }
   }

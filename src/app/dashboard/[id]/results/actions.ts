@@ -3,7 +3,7 @@
 import { auth } from '@/auth'
 import { prisma } from '@/lib/prisma'
 import { analyzeStudentAnswers, analyzeIndividualStudent } from '@/lib/ai-simulation'
-import { AIProvider } from '@/lib/ai'
+import { AIProvider, inferProviderFromModel } from '@/lib/ai'
 import { cached, cacheDelete, CacheKeys } from '@/lib/cache'
 import { rateLimit } from '@/lib/rate-limit'
 import { logger, logAI } from '@/lib/logger'
@@ -65,19 +65,20 @@ export async function analyzeAnswersAction(experimentId: string): Promise<{
     return { success: true, ...cachedResult }
   }
 
-  // Resolve API key & model (analysisModel override > defaultModel)
-  const preferred = (user.preferredProvider || 'deepseek') as AIProvider
+  // Resolve API key & model — infer provider from model ID if a per-function override is set
+  const model = user.analysisModel || user.defaultModel || undefined
+  const inferredProvider = model ? inferProviderFromModel(model) : null
+  const preferred = (inferredProvider || user.preferredProvider || 'deepseek') as AIProvider
   let apiKey = ''
   let provider: AIProvider = preferred
   let ollamaBaseUrl: string | undefined
-  const model = user.analysisModel || user.defaultModel || undefined
 
   switch (preferred) {
     case 'deepseek':
       apiKey = process.env.DEEPSEEK_API_KEY || user.deepseekApiKey || ''
       break
     case 'qwen':
-      apiKey = user.qwenApiKey || ''
+      apiKey = process.env.QWEN_API_KEY || user.qwenApiKey || ''
       break
     case 'gemini':
       apiKey = process.env.GEMINI_API_KEY || user.geminiApiKey || ''
@@ -185,19 +186,20 @@ export async function analyzeStudentAction(
     return { success: true, analysis: cachedStudent.analysis }
   }
 
-  // Resolve API key & model (analysisModel override > defaultModel)
-  const preferred = (user.preferredProvider || 'deepseek') as AIProvider
+  // Resolve API key & model — infer provider from model ID if a per-function override is set
+  const model = user.analysisModel || user.defaultModel || undefined
+  const inferredProvider = model ? inferProviderFromModel(model) : null
+  const preferred = (inferredProvider || user.preferredProvider || 'deepseek') as AIProvider
   let apiKey = ''
   let provider: AIProvider = preferred
   let ollamaBaseUrl: string | undefined
-  const model = user.analysisModel || user.defaultModel || undefined
 
   switch (preferred) {
     case 'deepseek':
       apiKey = process.env.DEEPSEEK_API_KEY || user.deepseekApiKey || ''
       break
     case 'qwen':
-      apiKey = user.qwenApiKey || ''
+      apiKey = process.env.QWEN_API_KEY || user.qwenApiKey || ''
       break
     case 'gemini':
       apiKey = process.env.GEMINI_API_KEY || user.geminiApiKey || ''

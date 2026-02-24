@@ -591,7 +591,7 @@ export default function SandboxStudio({
       
       {/* Left: Chat Panel */}
       <div className={cn(
-        "w-full md:w-[380px] md:min-w-[320px] border-r flex flex-col bg-muted/30 flex-1 md:flex-initial",
+        "w-full md:w-[380px] md:min-w-[320px] md:shrink-0 border-r flex flex-col bg-muted/30",
         mobileTab !== 'chat' && "hidden md:flex"
       )}>
         <div className="p-3 border-b bg-background flex items-center justify-between">
@@ -609,14 +609,14 @@ export default function SandboxStudio({
           </Button>
         </div>
         
-        <div className="flex-1 overflow-y-auto p-3 space-y-3">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden p-3 space-y-3 min-w-0">
           {messages.map((msg, i) => (
             <div
               key={i}
               className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
             >
               <div
-                className={`max-w-[90%] rounded-lg px-3 py-2 text-sm ${
+                className={`max-w-[90%] rounded-lg px-3 py-2 text-sm break-words ${
                   msg.role === 'user'
                     ? 'bg-primary text-primary-foreground'
                     : msg.role === 'system'
