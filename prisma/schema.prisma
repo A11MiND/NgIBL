@@ -74,6 +74,9 @@ model Experiment {
   questions      WorksheetQuestion[]
   submissions    StudentSubmission[]
   embeddings     Embedding[]
+  analysisRuns   AnalysisRun[]
+  questionMetricSnapshots QuestionMetricSnapshot[]
+  studentProgressSnapshots StudentProgressSnapshot[]
 
   @@index([userId, createdAt])
   @@index([subject])
@@ -195,4 +198,60 @@ model AuditLog {
 
   @@index([userId, createdAt])
   @@index([entity, action])
+}
+
+// ─── Progress Monitoring Snapshots ─────────────────────────────────
+
+model AnalysisRun {
+  id           String   @id @default(uuid())
+  experimentId String
+  experiment   Experiment @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+  kind         String   // CLASS_ANALYSIS | CLASS_COMPARE | STUDENT_ANALYSIS
+  classA       String?
+  classB       String?
+  model        String?
+  provider     String?
+  status       String   @default("SUCCESS") // SUCCESS | FAILED
+  error        String?
+  durationMs   Int?
+  metadata     Json?
+  createdAt    DateTime @default(now())
+
+  @@index([experimentId, createdAt])
+  @@index([kind, createdAt])
+}
+
+model QuestionMetricSnapshot {
+  id           String   @id @default(uuid())
+  experimentId String
+  experiment   Experiment @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+  questionId   String
+  className    String?
+  correctPct   Float
+  partialPct   Float
+  incorrectPct Float
+  sampleSize   Int
+  createdAt    DateTime @default(now())
+
+  @@index([experimentId, createdAt])
+  @@index([questionId, createdAt])
+  @@index([className, createdAt])
+}
+
+model StudentProgressSnapshot {
+  id              String   @id @default(uuid())
+  experimentId    String
+  experiment      Experiment @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+  studentId       String
+  studentName     String
+  className       String
+  submissionId    String?
+  progressScore   Float    // 0-100 composite score
+  strengths       Json?
+  weaknesses      Json?
+  metrics         Json?
+  createdAt       DateTime @default(now())
+
+  @@index([experimentId, studentId, createdAt])
+  @@index([className, createdAt])
 }

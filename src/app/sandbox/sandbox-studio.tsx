@@ -458,6 +458,7 @@ export default function SandboxStudio({
                     <SelectItem value="Chemistry">⚗️ Chemistry</SelectItem>
                     <SelectItem value="Biology">🧬 Biology</SelectItem>
                     <SelectItem value="Maths">📊 Maths</SelectItem>
+                    <SelectItem value="IS">🧪 Integrated Science (IS)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

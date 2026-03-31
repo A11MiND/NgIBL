@@ -193,6 +193,62 @@ interface GenerateOptions {
   images?: string[]
 }
 
+function isValidGeneratedOutput(code: string, type: 'REACT' | 'GEOGEBRA_API'): boolean {
+  const text = (code || '').trim()
+  if (!text) return false
+  if (type === 'REACT') {
+    return text.includes('export default function') && (text.includes('return (') || text.includes('return('))
+  }
+  try {
+    const parsed = JSON.parse(text)
+    return !!parsed && Array.isArray(parsed.commands)
+  } catch {
+    return false
+  }
+}
+
+async function generateAndNormalize(params: {
+  apiKey: string
+  provider: AIProvider
+  model?: string
+  ollamaBaseUrl?: string
+  temperature: number
+  type: 'REACT' | 'GEOGEBRA_API'
+  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>
+  images?: string[]
+}): Promise<string> {
+  const raw = await generateContent('', params.apiKey, params.provider, {
+    temperature: params.temperature,
+    model: params.model,
+    ollamaBaseUrl: params.ollamaBaseUrl,
+    images: params.images,
+    messages: params.messages,
+  })
+
+  let extracted = extractCode(raw, params.type)
+  if (isValidGeneratedOutput(extracted, params.type)) return extracted
+
+  // Retry once with stricter output instruction if first pass is malformed.
+  const strictRaw = await generateContent('', params.apiKey, params.provider, {
+    temperature: Math.min(params.temperature, 0.3),
+    model: params.model,
+    ollamaBaseUrl: params.ollamaBaseUrl,
+    messages: [
+      ...params.messages,
+      {
+        role: 'user',
+        content:
+          params.type === 'REACT'
+            ? 'Your previous answer was invalid. Return ONLY runnable React component code starting with export default function. No markdown. No comments. No explanation.'
+            : 'Your previous answer was invalid. Return ONLY valid JSON with keys: commands (array) and settings (object). No markdown. No explanation.',
+      },
+    ],
+  })
+
+  extracted = extractCode(strictRaw, params.type)
+  return extracted
+}
+
 /**
  * Generate a new simulation from a text prompt
  */
@@ -212,18 +268,25 @@ export async function generateSimulation(
       ? `${prompt}\n\n[The user has attached ${options.images.length} image(s). Please analyze the image(s) and generate a simulation based on what you see, combined with the text description above.]`
       : prompt
 
-    const code = await generateContent('', apiKey, provider, {
-      temperature: options.temperature ?? 0.7,
+    const code = await generateAndNormalize({
+      apiKey,
+      provider,
       model: options.model,
       ollamaBaseUrl: options.ollamaBaseUrl,
       images: options.images,
+      temperature: options.temperature ?? 0.7,
+      type,
       messages: [
         { role: 'system', content: systemPrompt },
-        { role: 'user', content: userContent }
-      ]
+        { role: 'user', content: userContent },
+      ],
     })
-    
-    return { success: true, code: extractCode(code, type) }
+
+    if (!isValidGeneratedOutput(code, type)) {
+      return { success: false, error: 'AI returned invalid simulation format. Please try again.' }
+    }
+
+    return { success: true, code }
   } catch (error: any) {
     console.error('AI generation error:', error)
     return {
@@ -247,19 +310,26 @@ export async function refineSimulation(
     const systemPrompt = type === 'REACT' ? REACT_SYSTEM_PROMPT : GEOGEBRA_SYSTEM_PROMPT
     
     const provider = options.provider || 'deepseek'
-    const code = await generateContent('', apiKey, provider, {
-      temperature: options.temperature ?? 0.7,
+    const code = await generateAndNormalize({
+      apiKey,
+      provider,
       model: options.model,
       ollamaBaseUrl: options.ollamaBaseUrl,
       images: options.images,
+      temperature: options.temperature ?? 0.7,
+      type,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: `Current ${type === 'REACT' ? 'code' : 'commands'}:\n\n${currentCode}` },
-        { role: 'user', content: `Modify it: ${instruction}\n\nIMPORTANT: Reply with ONLY the complete updated code/JSON. No explanations, no markdown.` }
-      ]
+        { role: 'user', content: `Modify it: ${instruction}\n\nIMPORTANT: Reply with ONLY the complete updated code/JSON. No explanations, no markdown.` },
+      ],
     })
-    
-    return { success: true, code: extractCode(code, type) }
+
+    if (!isValidGeneratedOutput(code, type)) {
+      return { success: false, error: 'AI returned invalid refined simulation format. Please try again.' }
+    }
+
+    return { success: true, code }
   } catch (error: any) {
     console.error('AI refinement error:', error)
     return {
@@ -293,17 +363,24 @@ ${error}
 CRITICAL: Return ONLY the complete fixed ${type === 'REACT' ? 'component code (export default function ... )' : 'JSON object'}. No explanations. No markdown fences. No text before or after the code.`
 
     const provider = options.provider || 'deepseek'
-    const fixed = await generateContent('', apiKey, provider, {
-      temperature: 0.3,
+    const fixed = await generateAndNormalize({
+      apiKey,
+      provider,
       model: options.model,
       ollamaBaseUrl: options.ollamaBaseUrl,
+      temperature: 0.3,
+      type,
       messages: [
         { role: 'system', content: systemPrompt },
-        { role: 'user', content: healPrompt }
-      ]
+        { role: 'user', content: healPrompt },
+      ],
     })
-    
-    return { success: true, code: extractCode(fixed, type) }
+
+    if (!isValidGeneratedOutput(fixed, type)) {
+      return { success: false, error: 'AI returned invalid healed simulation format. Please try manual edit.' }
+    }
+
+    return { success: true, code: fixed }
   } catch (error: any) {
     console.error('AI healing error:', error)
     return {

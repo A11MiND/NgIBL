@@ -10,6 +10,8 @@ import { ExportButton } from "@/components/export-button"
 import { getDictionary } from "@/lib/get-dictionary"
 import { AnalysisPanel } from "./analysis-panel"
 import { StudentAnalysisButton } from "./student-analysis-button"
+import { ClassComparisonPanel } from "./class-comparison-panel"
+import { ProgressMonitorPanel } from "./progress-monitor-panel"
 
 export default async function ResultsPage({ params }: { params: Promise<{ id: string }> }) {
   const session = await auth()
@@ -61,6 +63,8 @@ export default async function ResultsPage({ params }: { params: Promise<{ id: st
     return row
   })
 
+  const classNames = Array.from(new Set(experiment.submissions.map((s) => s.class))).sort()
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -85,6 +89,14 @@ export default async function ResultsPage({ params }: { params: Promise<{ id: st
       {/* AI Analysis */}
       {experiment.submissions.length > 0 && (
         <AnalysisPanel experimentId={experiment.id} dict={dict} />
+      )}
+
+      {experiment.submissions.length > 0 && (
+        <ClassComparisonPanel experimentId={experiment.id} classes={classNames} />
+      )}
+
+      {experiment.submissions.length > 0 && (
+        <ProgressMonitorPanel experimentId={experiment.id} classes={classNames} />
       )}
 
       <Card>

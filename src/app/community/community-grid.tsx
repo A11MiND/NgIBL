@@ -58,6 +58,7 @@ export default function CommunityGrid({
       case "Chemistry": return <FlaskConical className="h-5 w-5 text-purple-500" />
       case "Biology": return <Dna className="h-5 w-5 text-green-500" />
       case "Math": case "Maths": return <Code className="h-5 w-5 text-orange-500" />
+      case "IS": case "Integrated Science": return <FlaskConical className="h-5 w-5 text-cyan-500" />
       default: return <BookOpen className="h-5 w-5 text-gray-500" />
     }
   }
@@ -145,6 +146,7 @@ export default function CommunityGrid({
               <SelectItem value="Chemistry">Chemistry</SelectItem>
               <SelectItem value="Biology">Biology</SelectItem>
               <SelectItem value="Maths">Maths</SelectItem>
+              <SelectItem value="IS">Integrated Science (IS)</SelectItem>
             </SelectContent>
           </Select>
           

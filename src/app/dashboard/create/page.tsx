@@ -68,6 +68,7 @@ export default function CreateExperimentPage() {
                   <SelectItem value="Chemistry">Chemistry</SelectItem>
                   <SelectItem value="Biology">Biology</SelectItem>
                   <SelectItem value="Maths">Maths</SelectItem>
+                  <SelectItem value="IS">Integrated Science (IS)</SelectItem>
                   <SelectItem value="General Science">General Science</SelectItem>
                 </SelectContent>
               </Select>
