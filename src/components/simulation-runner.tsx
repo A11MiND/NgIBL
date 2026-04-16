@@ -149,7 +149,7 @@ interface SimulationRunnerProps {
 export default function SimulationRunner({ simulation, onError }: SimulationRunnerProps) {
   if (!simulation) {
     return (
-      <div className="flex items-center justify-center h-full min-h-[400px] text-gray-500">
+      <div className="flex h-full min-h-[260px] items-center justify-center text-gray-500 sm:min-h-[320px]">
         <div className="text-center">
           <Sparkles className="h-12 w-12 mx-auto mb-4 opacity-50" />
           <p>No simulation selected</p>
@@ -175,7 +175,7 @@ export default function SimulationRunner({ simulation, onError }: SimulationRunn
   }
 
   return (
-    <div className="flex items-center justify-center h-full min-h-[400px] text-gray-500">
+    <div className="flex h-full min-h-[260px] items-center justify-center text-gray-500 sm:min-h-[320px]">
       <div className="text-center">
         <AlertCircle className="h-12 w-12 mx-auto mb-4 text-amber-500" />
         <p>Simulation type not recognized</p>
@@ -497,7 +497,7 @@ function ReactRunner({ code, onError }: { code: string; onError?: (error: string
 
   return (
     <SimulationErrorBoundary codeKey={cleanCode}>
-      <div className="simulation-container w-full h-full min-h-[400px]">{element}</div>
+      <div className="simulation-container h-full min-h-[260px] w-full overflow-auto sm:min-h-[320px] [&>*]:max-w-full">{element}</div>
     </SimulationErrorBoundary>
   )
 }
@@ -551,7 +551,7 @@ function GeoGebraFileRunner({ fileUrl, settings }: { fileUrl: string; settings?:
     }
   }, [fileUrl, settings])
   
-  return <div ref={containerRef} className="w-full h-full min-h-[600px]" />
+  return <div ref={containerRef} className="h-full min-h-[320px] w-full sm:min-h-[420px]" />
 }
 
 function GeoGebraAPIRunner({ commands, settings }: { commands?: any; settings?: any }) {
@@ -645,7 +645,7 @@ function GeoGebraAPIRunner({ commands, settings }: { commands?: any; settings?: 
           </div>
         </div>
       )}
-      <div ref={containerRef} className="w-full h-full min-h-[600px]" />
+      <div ref={containerRef} className="h-full min-h-[320px] w-full sm:min-h-[420px]" />
     </div>
   )
 }

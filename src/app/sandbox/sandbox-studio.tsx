@@ -18,7 +18,8 @@ import {
   refineSimulationAction, 
   saveSimulationAction,
   healSimulationAction,
-  generateDescriptionAction
+  generateDescriptionAction,
+  persistCheckpointAction,
 } from "./actions"
 import SimulationRunner from "@/components/simulation-runner"
 import { useRouter } from "next/navigation"
@@ -37,6 +38,16 @@ interface VersionEntry {
   code: string
   timestamp: number
   prompt?: string
+  kind?: 'version' | 'checkpoint'
+  type?: 'REACT' | 'GEOGEBRA_API'
+}
+
+interface CheckpointEntry {
+  code: string
+  type: 'REACT' | 'GEOGEBRA_API'
+  timestamp: number
+  reason: string
+  persisted?: boolean
 }
 
 interface InitialSimulation {
@@ -116,8 +127,23 @@ export default function SandboxStudio({
   const [generatingDesc, setGeneratingDesc] = useState(false)
   
   // Version history
-  const [versionHistory, setVersionHistory] = useState<VersionEntry[]>(initialSimulation?.versionHistory || [])
+  const [versionHistory, setVersionHistory] = useState<VersionEntry[]>(
+    (initialSimulation?.versionHistory || []).filter((entry) => entry.kind !== 'checkpoint')
+  )
   const [showHistory, setShowHistory] = useState(false)
+  const [checkpoints, setCheckpoints] = useState<CheckpointEntry[]>(
+    (initialSimulation?.versionHistory || [])
+      .filter((entry) => entry.kind === 'checkpoint')
+      .slice(-20)
+      .map((entry) => ({
+        code: entry.code,
+        type: entry.type || initialSimulation?.type || 'REACT',
+        timestamp: entry.timestamp,
+        reason: (entry.prompt || 'Checkpoint').replace(/^\[checkpoint\]\s*/i, ''),
+        persisted: true,
+      }))
+  )
+  const [historySummary, setHistorySummary] = useState<string | undefined>(undefined)
   
   // Mobile responsive tab (chat vs preview)
   const [mobileTab, setMobileTab] = useState<'chat' | 'preview'>('chat')
@@ -163,12 +189,14 @@ export default function SandboxStudio({
           type: currentType,
           subject,
           messages,
+          checkpoints,
+          historySummary,
           timestamp: Date.now(),
         }))
       } catch {}
     }, 5000)
     return () => clearTimeout(timer)
-  }, [currentCode, currentType, subject, messages, draftKey, step])
+  }, [currentCode, currentType, subject, messages, checkpoints, historySummary, draftKey, step])
 
   function restoreDraft() {
     try {
@@ -178,6 +206,8 @@ export default function SandboxStudio({
         setCurrentType(draft.type || 'REACT')
         setSubject(draft.subject || 'Physics')
         setMessages(draft.messages || [])
+        setCheckpoints(Array.isArray(draft.checkpoints) ? draft.checkpoints : [])
+        setHistorySummary(draft.historySummary || undefined)
         setStep('chat')
         setHasDraft(false)
       }
@@ -187,6 +217,57 @@ export default function SandboxStudio({
   function dismissDraft() {
     localStorage.removeItem(draftKey)
     setHasDraft(false)
+  }
+
+  function createCheckpoint(reason: string) {
+    if (!currentCode) return
+    const entry: CheckpointEntry = {
+      code: currentCode,
+      type: currentType,
+      timestamp: Date.now(),
+      reason,
+      persisted: false,
+    }
+    setCheckpoints((prev) => [...prev.slice(-19), entry])
+
+    if (isEditing && initialSimulation?.id) {
+      void persistCheckpointAction(initialSimulation.id, {
+        code: entry.code,
+        type: entry.type,
+        timestamp: entry.timestamp,
+        reason: entry.reason,
+      }).then((result) => {
+        if (!result.success) return
+        setCheckpoints((prev) =>
+          prev.map((cp) =>
+            cp.timestamp === entry.timestamp && cp.reason === entry.reason
+              ? { ...cp, persisted: true }
+              : cp
+          )
+        )
+      }).catch(() => {
+        // Keep local checkpoint even if persistence fails.
+      })
+    }
+  }
+
+  function restoreLatestCheckpoint() {
+    if (checkpoints.length === 0) return
+    restoreCheckpointAt(checkpoints.length - 1)
+  }
+
+  function restoreCheckpointAt(index: number) {
+    const cp = checkpoints[index]
+    if (!cp) return
+    setCurrentCode(cp.code)
+    setCurrentType(cp.type)
+    setPreviewError(null)
+    setHealAttempts(0)
+    setCheckpoints(prev => prev.filter((_, i) => i !== index))
+    setMessages(prev => [...prev, {
+      role: 'system',
+      content: `⏮️ Restored: ${cp.reason} (${new Date(cp.timestamp).toLocaleTimeString()})`
+    }])
   }
   
   // Load pasted code directly into editor (skip AI generation)
@@ -242,16 +323,29 @@ export default function SandboxStudio({
     setInput('')
     imageUpload.clearImages()
     setMessages(prev => [...prev, { role: 'user', content: userMessage, images: images.length > 0 ? images : undefined }])
+    createCheckpoint(`Before refine: ${userMessage.slice(0, 60)}`)
     setLoading(true)
     setHealAttempts(0)
     setPreviewError(null)
-    
-    const result = await refineSimulationAction(currentCode, userMessage, currentType, images.length > 0 ? images : undefined)
-    
+
+    const conversationHistory = messages
+      .filter(m => m.role === 'user' || m.role === 'assistant')
+      .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }))
+
+    const result = await refineSimulationAction(
+      currentCode,
+      userMessage,
+      currentType,
+      images.length > 0 ? images : undefined,
+      conversationHistory,
+      historySummary
+    )
+
     if (result.success && result.code) {
       const cleaned = cleanCode(result.code)
       setCurrentCode(cleaned)
       setVariables(result.variables || [])
+      if (result.historySummary !== undefined) setHistorySummary(result.historySummary)
       setMessages(prev => [...prev, {
         role: 'assistant',
         content: '✅ Updated! Check the preview.'
@@ -271,6 +365,7 @@ export default function SandboxStudio({
     if (!previewError || !currentCode || healing) return
     
     setHealing(true)
+    createCheckpoint(`Before auto-fix: ${previewError.slice(0, 60)}`)
     setMessages(prev => [...prev, {
       role: 'system',
       content: `🔧 Attempting to fix: ${previewError.substring(0, 100)}...`
@@ -315,13 +410,26 @@ export default function SandboxStudio({
       }
 
       // Build version history entry
+      const unsavedCheckpointVersions: VersionEntry[] = checkpoints
+        .filter((cp) => !cp.persisted)
+        .map((cp, idx) => ({
+          version: versionHistory.length + idx + 1,
+          code: cp.code,
+          timestamp: cp.timestamp,
+          prompt: `[checkpoint] ${cp.reason}`,
+          kind: 'checkpoint',
+          type: cp.type,
+        }))
+
       const newVersion: VersionEntry = {
-        version: versionHistory.length + 1,
+        version: versionHistory.length + unsavedCheckpointVersions.length + 1,
         code: currentCode,
         timestamp: Date.now(),
         prompt: messages.filter(m => m.role === 'user').pop()?.content,
+        kind: 'version',
+        type: currentType,
       }
-      const updatedHistory = [...versionHistory, newVersion]
+      const updatedHistory = [...versionHistory, ...unsavedCheckpointVersions, newVersion]
 
       const data = {
         title: saveTitle,
@@ -585,7 +693,7 @@ export default function SandboxStudio({
   
   // Chat + Preview Mode
   return (
-    <div className="flex flex-col md:flex-row -mx-4 md:-mx-8 -mt-8 -mb-8" style={{ height: 'calc(100vh - 64px)' }}>
+    <div className="flex h-[calc(100dvh-4rem)] min-h-0 flex-col overflow-hidden md:flex-row">
       {/* Mobile tab switcher */}
       <div className="flex md:hidden border-b bg-background shrink-0">
         <button
@@ -612,7 +720,7 @@ export default function SandboxStudio({
       
       {/* Left: Chat Panel */}
       <div className={cn(
-        "w-full md:w-[380px] md:min-w-[320px] md:shrink-0 border-r flex flex-col bg-muted/30",
+        "w-full min-h-0 border-r bg-muted/30 md:flex md:w-[360px] md:min-w-[300px] md:shrink-0 md:flex-col lg:w-[380px] lg:min-w-[320px]",
         mobileTab !== 'chat' && "hidden md:flex"
       )}>
         <div className="p-3 border-b bg-background flex items-center justify-between">
@@ -693,7 +801,30 @@ export default function SandboxStudio({
             </div>
           </div>
         )}
-        
+
+        {checkpoints.length > 0 && !loading && (
+          <div className="px-3 py-2 border-t bg-muted/50">
+            <p className="text-xs font-medium text-muted-foreground mb-1.5 flex items-center gap-1">
+              <RotateCcw className="h-3 w-3" />
+              Checkpoints ({checkpoints.length})
+            </p>
+            <div className="space-y-1 max-h-[120px] overflow-y-auto">
+              {checkpoints.slice().reverse().map((cp, i) => (
+                <div key={cp.timestamp} className="flex items-center justify-between text-xs">
+                  <span className="text-muted-foreground truncate flex-1 mr-2">{cp.reason}</span>
+                  <button
+                    type="button"
+                    onClick={() => restoreCheckpointAt(checkpoints.length - 1 - i)}
+                    className="text-xs text-blue-600 dark:text-blue-400 hover:underline shrink-0"
+                  >
+                    Restore
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <form onSubmit={handleRefine} className="p-3 border-t bg-background">
           {imageUpload.pendingImages.length > 0 && (
             <ImagePreviewBar images={imageUpload.pendingImages} onRemove={imageUpload.removeImage} compact />
@@ -741,6 +872,11 @@ export default function SandboxStudio({
               <Save className="mr-2 h-4 w-4" />
               {isEditing ? 'Update' : 'Save to Library'}
             </Button>
+            {checkpoints.length > 0 && (
+              <Button variant="ghost" size="sm" onClick={restoreLatestCheckpoint} title="Restore latest checkpoint">
+                <RotateCcw className="h-4 w-4" />
+              </Button>
+            )}
             {versionHistory.length > 0 && (
               <Button variant="ghost" size="sm" onClick={() => setShowHistory(!showHistory)} title="Version History">
                 <History className="h-4 w-4" />
@@ -820,10 +956,10 @@ export default function SandboxStudio({
       
       {/* Right: Preview */}
       <div className={cn(
-        "flex-1 flex flex-col min-w-0",
+        "flex min-h-0 min-w-0 flex-1 flex-col",
         mobileTab !== 'preview' && "hidden md:flex"
       )}>
-        <Tabs defaultValue="preview" className="flex-1 flex flex-col">
+        <Tabs defaultValue="preview" className="flex min-h-0 flex-1 flex-col">
           <div className="border-b px-4">
             <TabsList>
               <TabsTrigger value="preview">
@@ -837,12 +973,14 @@ export default function SandboxStudio({
             </TabsList>
           </div>
           
-          <TabsContent value="preview" className="flex-1 m-0 p-4 overflow-auto">
+          <TabsContent value="preview" className="m-0 flex min-h-0 flex-1 flex-col overflow-hidden p-3 sm:p-4">
             {currentCode ? (
-              <MemoSimulationRunner
-                simulation={previewSimulation}
-                onError={setPreviewError}
-              />
+              <div className="min-h-0 flex-1 overflow-auto rounded-lg border bg-background p-2 sm:p-3">
+                <MemoSimulationRunner
+                  simulation={previewSimulation}
+                  onError={setPreviewError}
+                />
+              </div>
             ) : (
               <div className="flex items-center justify-center h-full text-muted-foreground">
                 <div className="text-center">
@@ -853,8 +991,8 @@ export default function SandboxStudio({
             )}
           </TabsContent>
           
-          <TabsContent value="code" className="flex-1 m-0 p-4">
-            <pre className="bg-muted p-4 rounded-lg text-xs overflow-auto h-full font-mono leading-relaxed">
+          <TabsContent value="code" className="m-0 flex min-h-0 flex-1 p-3 sm:p-4">
+            <pre className="h-full min-h-0 flex-1 overflow-auto rounded-lg bg-muted p-4 font-mono text-xs leading-relaxed">
               <code>{currentCode || 'No code yet'}</code>
             </pre>
           </TabsContent>

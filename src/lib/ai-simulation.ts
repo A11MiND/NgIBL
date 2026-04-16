@@ -114,7 +114,7 @@ CRITICAL RULES:
 5. Prefer standard HTML <button> elements over the Button component for simplicity.
 6. For physics: store position/velocity in useRef, use requestAnimationFrame for animation.
 7. ALWAYS render the initial state immediately on mount — don't wait for Play to be clicked.
-8. Keep the component under 150 lines total. Simpler is better.
+8. Do NOT remove existing features, axes, ticks, labels, or controls to shorten the code. Preserve all functionality.
 
 EXAMPLE CANVAS PATTERN:
 export default function MySim() {
@@ -191,6 +191,30 @@ interface GenerateOptions {
   model?: string
   ollamaBaseUrl?: string
   images?: string[]
+  history?: Array<{ role: 'user' | 'assistant'; content: string }>
+  historySummary?: string
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback
+}
+
+function compressCode(code: string): string {
+  return code
+    .replace(/^\s*\/\/.*$/gm, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+function buildRefineInstruction(
+  type: 'REACT' | 'GEOGEBRA_API',
+  currentCode: string,
+  instruction: string
+): string {
+  const target = type === 'REACT' ? 'React component code' : 'GeoGebra JSON'
+  const label = type === 'REACT' ? 'Current code' : 'Current commands JSON'
+
+  return `${label}:\n\n${compressCode(currentCode)}\n\nNew change request:\n${instruction}\n\nCRITICAL PRESERVATION REQUIREMENTS:\n1. Keep ALL existing functionalities unless the user explicitly requests removal.\n2. Preserve existing axes/ticks/labels/controls/interactions if they exist.\n3. Apply minimal, surgical edits on top of the current code. Do not rewrite from scratch.\n4. Return ONLY the complete updated ${target}. No markdown, no explanations.`
 }
 
 function isValidGeneratedOutput(code: string, type: 'REACT' | 'GEOGEBRA_API'): boolean {
@@ -287,11 +311,11 @@ export async function generateSimulation(
     }
 
     return { success: true, code }
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('AI generation error:', error)
     return {
       success: false,
-      error: error.message || 'Failed to generate simulation'
+      error: getErrorMessage(error, 'Failed to generate simulation')
     }
   }
 }
@@ -308,8 +332,20 @@ export async function refineSimulation(
 ): Promise<{ success: boolean; code?: string; error?: string }> {
   try {
     const systemPrompt = type === 'REACT' ? REACT_SYSTEM_PROMPT : GEOGEBRA_SYSTEM_PROMPT
-    
+    const refineInstruction = buildRefineInstruction(type, currentCode, instruction)
+
     const provider = options.provider || 'deepseek'
+
+    const contextMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = []
+    if (options.historySummary) {
+      contextMessages.push({ role: 'system', content: `Previous conversation summary: ${options.historySummary}` })
+    }
+    if (options.history && options.history.length > 0) {
+      for (const msg of options.history) {
+        contextMessages.push(msg)
+      }
+    }
+
     const code = await generateAndNormalize({
       apiKey,
       provider,
@@ -320,8 +356,8 @@ export async function refineSimulation(
       type,
       messages: [
         { role: 'system', content: systemPrompt },
-        { role: 'user', content: `Current ${type === 'REACT' ? 'code' : 'commands'}:\n\n${currentCode}` },
-        { role: 'user', content: `Modify it: ${instruction}\n\nIMPORTANT: Reply with ONLY the complete updated code/JSON. No explanations, no markdown.` },
+        ...contextMessages,
+        { role: 'user', content: refineInstruction },
       ],
     })
 
@@ -330,11 +366,11 @@ export async function refineSimulation(
     }
 
     return { success: true, code }
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('AI refinement error:', error)
     return {
       success: false,
-      error: error.message || 'Failed to refine simulation'
+      error: getErrorMessage(error, 'Failed to refine simulation')
     }
   }
 }
@@ -381,13 +417,37 @@ CRITICAL: Return ONLY the complete fixed ${type === 'REACT' ? 'component code (e
     }
 
     return { success: true, code: fixed }
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('AI healing error:', error)
     return {
       success: false,
-      error: error.message || 'Failed to fix simulation'
+      error: getErrorMessage(error, 'Failed to fix simulation')
     }
   }
+}
+
+/**
+ * Summarize a list of conversation messages into a short paragraph.
+ * Used for sliding window history compression.
+ */
+export async function summarizeHistory(
+  messages: Array<{ role: 'user' | 'assistant'; content: string }>,
+  apiKey: string,
+  options: Pick<GenerateOptions, 'provider' | 'model' | 'ollamaBaseUrl'>
+): Promise<string> {
+  const provider = options.provider || 'deepseek'
+  const transcript = messages
+    .map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
+    .join('\n')
+  return generateContent('', apiKey, provider, {
+    temperature: 0.3,
+    model: options.model,
+    ollamaBaseUrl: options.ollamaBaseUrl,
+    messages: [
+      { role: 'system', content: 'Summarize the following simulation editing conversation in 2-3 sentences. Focus on what features were added, changed, or removed. Be concise and factual.' },
+      { role: 'user', content: transcript },
+    ],
+  })
 }
 
 /**
@@ -411,8 +471,8 @@ export async function generateDescription(
       ]
     })
     return { success: true, description: result.trim() }
-  } catch (error: any) {
-    return { success: false, error: error.message }
+  } catch (error: unknown) {
+    return { success: false, error: getErrorMessage(error, 'Failed to generate description') }
   }
 }
 
@@ -479,8 +539,8 @@ CRITICAL: Output ONLY the JSON object. No markdown fences. No text before or aft
     }
 
     return { success: true, analysis: result }
-  } catch (error: any) {
-    return { success: false, error: error.message }
+  } catch (error: unknown) {
+    return { success: false, error: getErrorMessage(error, 'Failed to analyze student answers') }
   }
 }
 
@@ -534,8 +594,8 @@ Use markdown formatting. Be concise, supportive, and constructive. Address the s
       ]
     })
     return { success: true, analysis: result }
-  } catch (error: any) {
-    return { success: false, error: error.message }
+  } catch (error: unknown) {
+    return { success: false, error: getErrorMessage(error, 'Failed to analyze individual student') }
   }
 }
 
@@ -545,11 +605,17 @@ Use markdown formatting. Be concise, supportive, and constructive. Address the s
 export function detectVariables(code: string): Array<{
   name: string
   type: 'number' | 'boolean' | 'string'
-  defaultValue?: any
+  defaultValue?: string | number | boolean
   min?: number
   max?: number
 }> {
-  const variables: Array<any> = []
+  const variables: Array<{
+    name: string
+    type: 'number' | 'boolean' | 'string'
+    defaultValue?: string | number | boolean
+    min?: number
+    max?: number
+  }> = []
   
   // Optimized regex - only search in first 10000 chars
   const searchCode = code.substring(0, Math.min(10000, code.length))
@@ -567,7 +633,7 @@ export function detectVariables(code: string): Array<{
     if (seenNames.has(name)) continue
     seenNames.add(name)
     
-    let defaultValue: any = defaultValueStr.trim()
+    let defaultValue: string | number | boolean = defaultValueStr.trim()
     let type: 'number' | 'boolean' | 'string' = 'string'
     
     // Fast type detection
@@ -586,7 +652,6 @@ export function detectVariables(code: string): Array<{
     }
     
     // Quick range search - only in nearby context
-    const varEndIdx = Math.min(searchCode.indexOf('\n\n') || searchCode.length, searchCode.length)
     const rangeRegex = new RegExp(
       `value={${name}}[^>]*?(?:min|max)=["']([^"']+)["']`,
       'i'
