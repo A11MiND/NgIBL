@@ -109,6 +109,8 @@ export default function SandboxStudio({
   )
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [runStage, setRunStage] = useState('')
+  const [runProgress, setRunProgress] = useState(0)
   
   // Simulation state
   const [currentCode, setCurrentCode] = useState(initialSimulation?.code || '')
@@ -156,6 +158,11 @@ export default function SandboxStudio({
   const draftKey = isEditing ? `${DRAFT_KEY_PREFIX}${initialSimulation!.id}` : `${DRAFT_KEY_PREFIX}new`
 
   const chatEndRef = useRef<HTMLDivElement>(null)
+  const refineFormRef = useRef<HTMLFormElement>(null)
+  const refineInputRef = useRef<HTMLTextAreaElement>(null)
+  const activeRunIdRef = useRef(0)
+  const runTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const pendingCheckpointRef = useRef<number | null>(null)
 
   // Prevent hydration mismatch from Radix Select IDs (server vs client)
   const [mounted, setMounted] = useState(false)
@@ -168,16 +175,102 @@ export default function SandboxStudio({
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
+  useEffect(() => {
+    if (!refineInputRef.current) return
+    refineInputRef.current.style.height = 'auto'
+    refineInputRef.current.style.height = `${Math.min(refineInputRef.current.scrollHeight, 140)}px`
+  }, [input])
+
+  function startRun(kind: 'generate' | 'refine' | 'heal') {
+    const runId = Date.now()
+    activeRunIdRef.current = runId
+    if (runTimerRef.current) clearInterval(runTimerRef.current)
+
+    setRunProgress(8)
+    setRunStage(
+      kind === 'generate'
+        ? 'Preparing generation context...'
+        : kind === 'refine'
+        ? 'Reading current simulation and applying edits...'
+        : 'Analyzing runtime error and preparing fix...'
+    )
+
+    runTimerRef.current = setInterval(() => {
+      setRunProgress((prev) => {
+        if (prev >= 92) return prev
+        if (prev < 50) return prev + 7
+        if (prev < 80) return prev + 4
+        return prev + 2
+      })
+    }, 700)
+    setLoading(true)
+    return runId
+  }
+
+  function finishRun(runId: number) {
+    if (activeRunIdRef.current === runId) {
+      if (runTimerRef.current) clearInterval(runTimerRef.current)
+      runTimerRef.current = null
+      setRunProgress(100)
+      setTimeout(() => {
+        setRunProgress(0)
+        setRunStage('')
+      }, 250)
+      setLoading(false)
+    }
+  }
+
+  function isStaleRun(runId: number) {
+    return activeRunIdRef.current !== runId
+  }
+
+  function stopCurrentRun() {
+    activeRunIdRef.current = Date.now()
+    if (runTimerRef.current) clearInterval(runTimerRef.current)
+    runTimerRef.current = null
+    if (pendingCheckpointRef.current !== null) {
+      const targetTs = pendingCheckpointRef.current
+      setCheckpoints((prev) => prev.filter((cp) => cp.timestamp !== targetTs))
+      pendingCheckpointRef.current = null
+    }
+    setRunProgress(0)
+    setRunStage('')
+    setLoading(false)
+    setHealing(false)
+    setMessages((prev) => [...prev, {
+      role: 'system',
+      content: '⏹️ Stopped. The current AI response was canceled on the client side.'
+    }])
+  }
+
   // Check for saved draft on mount
   useEffect(() => {
-    if (isEditing) return // Skip draft check for edit mode
     try {
       const draft = localStorage.getItem(draftKey)
       if (draft) {
-        setHasDraft(true)
+        if (isEditing) {
+          const parsed = JSON.parse(draft)
+          if (parsed?.code) {
+            setCurrentCode(parsed.code)
+            setCurrentType(parsed.type || 'REACT')
+            setSubject(parsed.subject || 'Physics')
+            setMessages(parsed.messages || [])
+            setCheckpoints(Array.isArray(parsed.checkpoints) ? parsed.checkpoints : [])
+            setHistorySummary(parsed.historySummary || undefined)
+            setStep('chat')
+          }
+        } else {
+          setHasDraft(true)
+        }
       }
     } catch {}
   }, [draftKey, isEditing])
+
+  useEffect(() => {
+    return () => {
+      if (runTimerRef.current) clearInterval(runTimerRef.current)
+    }
+  }, [])
 
   // Auto-save draft when code changes (debounced)
   useEffect(() => {
@@ -194,7 +287,7 @@ export default function SandboxStudio({
           timestamp: Date.now(),
         }))
       } catch {}
-    }, 5000)
+    }, 10 * 60 * 1000)
     return () => clearTimeout(timer)
   }, [currentCode, currentType, subject, messages, checkpoints, historySummary, draftKey, step])
 
@@ -219,8 +312,8 @@ export default function SandboxStudio({
     setHasDraft(false)
   }
 
-  function createCheckpoint(reason: string) {
-    if (!currentCode) return
+  function createCheckpoint(reason: string): CheckpointEntry | null {
+    if (!currentCode) return null
     const entry: CheckpointEntry = {
       code: currentCode,
       type: currentType,
@@ -229,26 +322,28 @@ export default function SandboxStudio({
       persisted: false,
     }
     setCheckpoints((prev) => [...prev.slice(-19), entry])
+    return entry
+  }
 
-    if (isEditing && initialSimulation?.id) {
-      void persistCheckpointAction(initialSimulation.id, {
-        code: entry.code,
-        type: entry.type,
-        timestamp: entry.timestamp,
-        reason: entry.reason,
-      }).then((result) => {
-        if (!result.success) return
-        setCheckpoints((prev) =>
-          prev.map((cp) =>
-            cp.timestamp === entry.timestamp && cp.reason === entry.reason
-              ? { ...cp, persisted: true }
-              : cp
-          )
+  function persistCheckpoint(entry: CheckpointEntry) {
+    if (!isEditing || !initialSimulation?.id) return
+    void persistCheckpointAction(initialSimulation.id, {
+      code: entry.code,
+      type: entry.type,
+      timestamp: entry.timestamp,
+      reason: entry.reason,
+    }).then((result) => {
+      if (!result.success) return
+      setCheckpoints((prev) =>
+        prev.map((cp) =>
+          cp.timestamp === entry.timestamp && cp.reason === entry.reason
+            ? { ...cp, persisted: true }
+            : cp
         )
-      }).catch(() => {
-        // Keep local checkpoint even if persistence fails.
-      })
-    }
+      )
+    }).catch(() => {
+      // Keep local checkpoint even if persistence fails.
+    })
   }
 
   function restoreLatestCheckpoint() {
@@ -283,8 +378,8 @@ export default function SandboxStudio({
   // Handle initial generation
   async function handleGenerate() {
     if (!initialPrompt.trim() && imageUpload.pendingImages.length === 0) return
-    
-    setLoading(true)
+
+    const runId = startRun('generate')
     setStep('chat')
     setHealAttempts(0)
     setPreviewError(null)
@@ -293,8 +388,12 @@ export default function SandboxStudio({
     imageUpload.clearImages()
     
     const result = await generateSimulationAction(initialPrompt, subject, simulationType, images.length > 0 ? images : undefined)
+
+    if (isStaleRun(runId)) return
     
     if (result.success && result.code) {
+      setRunStage('Rendering generated simulation...')
+      setRunProgress(96)
       const cleaned = cleanCode(result.code)
       setCurrentCode(cleaned)
       setCurrentType(result.type!)
@@ -310,7 +409,7 @@ export default function SandboxStudio({
       }])
     }
     
-    setLoading(false)
+    finishRun(runId)
   }
   
   // Handle refinement
@@ -323,8 +422,9 @@ export default function SandboxStudio({
     setInput('')
     imageUpload.clearImages()
     setMessages(prev => [...prev, { role: 'user', content: userMessage, images: images.length > 0 ? images : undefined }])
-    createCheckpoint(`Before refine: ${userMessage.slice(0, 60)}`)
-    setLoading(true)
+    const checkpoint = createCheckpoint(`Before refine: ${userMessage.slice(0, 60)}`)
+    if (checkpoint) pendingCheckpointRef.current = checkpoint.timestamp
+    const runId = startRun('refine')
     setHealAttempts(0)
     setPreviewError(null)
 
@@ -341,7 +441,14 @@ export default function SandboxStudio({
       historySummary
     )
 
+    if (isStaleRun(runId)) return
+
+    pendingCheckpointRef.current = null
+    if (checkpoint) persistCheckpoint(checkpoint)
+
     if (result.success && result.code) {
+      setRunStage('Applying updated code...')
+      setRunProgress(96)
       const cleaned = cleanCode(result.code)
       setCurrentCode(cleaned)
       setVariables(result.variables || [])
@@ -357,23 +464,32 @@ export default function SandboxStudio({
       }])
     }
     
-    setLoading(false)
+    finishRun(runId)
   }
   
   // Manual fix error button
   async function handleFixError() {
     if (!previewError || !currentCode || healing) return
-    
+
+    const runId = startRun('heal')
     setHealing(true)
-    createCheckpoint(`Before auto-fix: ${previewError.slice(0, 60)}`)
+    const checkpoint = createCheckpoint(`Before auto-fix: ${previewError.slice(0, 60)}`)
+    if (checkpoint) pendingCheckpointRef.current = checkpoint.timestamp
     setMessages(prev => [...prev, {
       role: 'system',
       content: `🔧 Attempting to fix: ${previewError.substring(0, 100)}...`
     }])
     
     const result = await healSimulationAction(currentCode, previewError, currentType)
+
+    if (isStaleRun(runId)) return
+
+    pendingCheckpointRef.current = null
+    if (checkpoint) persistCheckpoint(checkpoint)
     
     if (result.success && 'code' in result && result.code) {
+      setRunStage('Applying auto-fix...')
+      setRunProgress(96)
       const cleaned = cleanCode(result.code)
       setCurrentCode(cleaned)
       setPreviewError(null)
@@ -391,6 +507,7 @@ export default function SandboxStudio({
     }
     
     setHealing(false)
+    finishRun(runId)
   }
   
   // Handle save
@@ -760,15 +877,21 @@ export default function SandboxStudio({
                     ))}
                   </div>
                 )}
-                {msg.content}
+                <div className="whitespace-pre-wrap break-words">{msg.content}</div>
               </div>
             </div>
           ))}
           {loading && (
             <div className="flex justify-start">
-              <div className="bg-muted rounded-lg px-4 py-3 flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                <span>AI is thinking...</span>
+              <div className="bg-muted rounded-lg px-4 py-3 space-y-2 text-sm text-muted-foreground w-full max-w-[90%]">
+                <div className="flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>{runStage || 'AI is thinking...'}</span>
+                  <span className="ml-auto text-xs">{Math.round(runProgress)}%</span>
+                </div>
+                <div className="h-1.5 w-full rounded bg-background/60 overflow-hidden">
+                  <div className="h-full bg-primary transition-all duration-300" style={{ width: `${Math.max(4, Math.min(100, runProgress))}%` }} />
+                </div>
               </div>
             </div>
           )}
@@ -802,7 +925,7 @@ export default function SandboxStudio({
           </div>
         )}
 
-        {checkpoints.length > 0 && !loading && (
+        {checkpoints.length > 0 && (
           <div className="px-3 py-2 border-t bg-muted/50">
             <p className="text-xs font-medium text-muted-foreground mb-1.5 flex items-center gap-1">
               <RotateCcw className="h-3 w-3" />
@@ -825,7 +948,7 @@ export default function SandboxStudio({
           </div>
         )}
 
-        <form onSubmit={handleRefine} className="p-3 border-t bg-background">
+        <form ref={refineFormRef} onSubmit={handleRefine} className="p-3 border-t bg-background">
           {imageUpload.pendingImages.length > 0 && (
             <ImagePreviewBar images={imageUpload.pendingImages} onRemove={imageUpload.removeImage} compact />
           )}
@@ -852,17 +975,31 @@ export default function SandboxStudio({
                 e.target.value = ''
               }}
             />
-            <Input
+            <Textarea
+              ref={refineInputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onPaste={imageUpload.handlePaste}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  refineFormRef.current?.requestSubmit()
+                }
+              }}
               placeholder="E.g., Add a slider for speed..."
               disabled={loading || !currentCode}
-              className="text-sm"
+              rows={1}
+              className="min-h-[40px] max-h-[140px] resize-none text-sm"
             />
-            <Button type="submit" size="icon" disabled={loading || !currentCode || (!input.trim() && imageUpload.pendingImages.length === 0)}>
-              <Send className="h-4 w-4" />
-            </Button>
+            {loading ? (
+              <Button type="button" size="icon" variant="destructive" onClick={stopCurrentRun}>
+                <X className="h-4 w-4" />
+              </Button>
+            ) : (
+              <Button type="submit" size="icon" disabled={!currentCode || (!input.trim() && imageUpload.pendingImages.length === 0)}>
+                <Send className="h-4 w-4" />
+              </Button>
+            )}
           </div>
         </form>
         

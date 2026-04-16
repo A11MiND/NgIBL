@@ -9,9 +9,13 @@ import { revalidatePath } from 'next/cache'
 /**
  * Resolve the user's preferred AI provider, API key, model, and function-specific override.
  */
-async function resolveProvider(user: any, functionField?: string): Promise<{ apiKey: string; provider: AIProvider; ollamaBaseUrl?: string; model?: string }> {
+async function resolveProvider(
+  user: any,
+  functionField?: string,
+  explicitModel?: string
+): Promise<{ apiKey: string; provider: AIProvider; ollamaBaseUrl?: string; model?: string }> {
   // Resolve model first; infer provider from model ID if set
-  const model = (functionField && user[functionField]) || user.defaultModel || undefined
+  const model = explicitModel || (functionField && user[functionField]) || user.defaultModel || undefined
   const inferredProvider = model ? inferProviderFromModel(model) : null
   const preferred = inferredProvider || user.preferredProvider || 'deepseek'
 
@@ -54,7 +58,8 @@ export async function generateSimulationAction(
   prompt: string,
   subject: string,
   type: 'REACT' | 'GEOGEBRA_API',
-  images?: string[]
+  images?: string[],
+  modelOverride?: string
 ) {
   try {
     const session = await auth()
@@ -81,7 +86,7 @@ export async function generateSimulationAction(
       resolved = { apiKey: qwenKey, provider: 'qwen' }
       model = 'qwen3-vl-plus'
     } else {
-      resolved = await resolveProvider(user, 'simulationModel')
+      resolved = await resolveProvider(user, 'simulationModel', modelOverride)
       model = resolved.model
     }
 
@@ -181,7 +186,8 @@ export async function refineSimulationAction(
   type: 'REACT' | 'GEOGEBRA_API',
   images?: string[],
   history?: Array<{ role: 'user' | 'assistant'; content: string }>,
-  historySummary?: string
+  historySummary?: string,
+  modelOverride?: string
 ) {
   try {
     const session = await auth()
@@ -204,7 +210,7 @@ export async function refineSimulationAction(
       resolved = { apiKey: qwenKey, provider: 'qwen' }
       model = 'qwen3-vl-plus'
     } else {
-      resolved = await resolveProvider(user!, 'simulationModel')
+      resolved = await resolveProvider(user!, 'simulationModel', modelOverride)
       model = resolved.model
     }
 
@@ -256,7 +262,8 @@ export async function refineSimulationAction(
 export async function healSimulationAction(
   code: string,
   error: string,
-  type: 'REACT' | 'GEOGEBRA_API'
+  type: 'REACT' | 'GEOGEBRA_API',
+  modelOverride?: string
 ) {
   try {
     const session = await auth()
@@ -268,7 +275,7 @@ export async function healSimulationAction(
       where: { email: session.user.email }
     })
 
-    const { apiKey, provider, ollamaBaseUrl, model } = await resolveProvider(user!, 'simulationModel')
+    const { apiKey, provider, ollamaBaseUrl, model } = await resolveProvider(user!, 'simulationModel', modelOverride)
 
     const result = await healSimulation(code, error, type, apiKey, {
       provider,
