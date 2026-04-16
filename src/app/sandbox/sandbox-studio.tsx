@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useEffect, useCallback } from "react"
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -70,6 +70,7 @@ function cleanCode(code: string): string {
 }
 
 const DRAFT_KEY_PREFIX = "sandbox-draft-"
+const MemoSimulationRunner = React.memo(SimulationRunner)
 
 export default function SandboxStudio({ 
   hasApiKey,
@@ -385,6 +386,25 @@ export default function SandboxStudio({
   function handleReset() {
     router.push('/sandbox')
   }
+
+  const previewSimulation = useMemo(() => {
+    if (!currentCode) return null
+
+    return {
+      type: currentType,
+      reactCode: currentType === 'REACT' ? currentCode : null,
+      geogebraCommands:
+        currentType === 'GEOGEBRA_API'
+          ? (() => {
+              try {
+                return JSON.parse(currentCode)
+              } catch {
+                return { commands: [currentCode] }
+              }
+            })()
+          : null,
+    }
+  }, [currentCode, currentType])
   
   if (!hasApiKey) {
     return (
@@ -819,12 +839,8 @@ export default function SandboxStudio({
           
           <TabsContent value="preview" className="flex-1 m-0 p-4 overflow-auto">
             {currentCode ? (
-              <SimulationRunner
-                simulation={{
-                  type: currentType,
-                  reactCode: currentType === 'REACT' ? currentCode : null,
-                  geogebraCommands: currentType === 'GEOGEBRA_API' ? (() => { try { return JSON.parse(currentCode) } catch { return { commands: [currentCode] } } })() : null
-                }}
+              <MemoSimulationRunner
+                simulation={previewSimulation}
                 onError={setPreviewError}
               />
             ) : (

@@ -1,7 +1,7 @@
 "use client"
 
 import { useRunner } from "react-runner"
-import React, { useEffect, useRef, useMemo } from "react"
+import React, { useEffect, useRef, useMemo, useCallback } from "react"
 import { Play, Pause, RotateCcw, Settings, AlertCircle, Sparkles, Plus, Minus, ArrowRight, ArrowLeft, ArrowUp, ArrowDown, RefreshCw, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Info, HelpCircle, Check, X, Zap, Thermometer, Droplets, Wind, Sun, Moon, Atom, FlaskConical, Ruler, Timer, Eye, EyeOff, Volume2, VolumeX } from "lucide-react"
 import { 
   LineChart, BarChart, AreaChart, ScatterChart,
@@ -197,6 +197,181 @@ function ReactRunner({ code, onError }: { code: string; onError?: (error: string
       .trim()
   }, [code])
 
+  const trackedResources = useRef({
+    timeouts: new Set<number>(),
+    intervals: new Set<number>(),
+    animationFrames: new Set<number>(),
+    listeners: new Set<{
+      target: EventTarget
+      type: string
+      listener: EventListenerOrEventListenerObject
+      options?: boolean | AddEventListenerOptions
+    }>(),
+  })
+
+  const unregisterListener = useCallback((
+    target: EventTarget,
+    type: string,
+    listener: EventListenerOrEventListenerObject,
+    options?: boolean | AddEventListenerOptions
+  ) => {
+    target.removeEventListener(type, listener, options)
+    for (const entry of trackedResources.current.listeners) {
+      if (entry.target === target && entry.type === type && entry.listener === listener) {
+        trackedResources.current.listeners.delete(entry)
+        break
+      }
+    }
+  }, [])
+
+  const cleanupResources = useCallback(() => {
+    for (const id of trackedResources.current.timeouts) {
+      window.clearTimeout(id)
+    }
+    for (const id of trackedResources.current.intervals) {
+      window.clearInterval(id)
+    }
+    for (const id of trackedResources.current.animationFrames) {
+      window.cancelAnimationFrame(id)
+    }
+    for (const entry of trackedResources.current.listeners) {
+      entry.target.removeEventListener(entry.type, entry.listener, entry.options)
+    }
+
+    trackedResources.current.timeouts.clear()
+    trackedResources.current.intervals.clear()
+    trackedResources.current.animationFrames.clear()
+    trackedResources.current.listeners.clear()
+  }, [])
+
+  const trackedSetTimeout = useCallback((handler: TimerHandler, timeout?: number, ...args: any[]) => {
+    if (typeof window === 'undefined') return 0
+    const id = window.setTimeout(handler, timeout, ...args)
+    trackedResources.current.timeouts.add(id)
+    return id
+  }, [])
+
+  const trackedClearTimeout = useCallback((id: number) => {
+    if (typeof window === 'undefined') return
+    trackedResources.current.timeouts.delete(id)
+    window.clearTimeout(id)
+  }, [])
+
+  const trackedSetInterval = useCallback((handler: TimerHandler, timeout?: number, ...args: any[]) => {
+    if (typeof window === 'undefined') return 0
+    const id = window.setInterval(handler, timeout, ...args)
+    trackedResources.current.intervals.add(id)
+    return id
+  }, [])
+
+  const trackedClearInterval = useCallback((id: number) => {
+    if (typeof window === 'undefined') return
+    trackedResources.current.intervals.delete(id)
+    window.clearInterval(id)
+  }, [])
+
+  const trackedRequestAnimationFrame = useCallback((callback: FrameRequestCallback) => {
+    if (typeof window === 'undefined') return 0
+    const id = window.requestAnimationFrame(callback)
+    trackedResources.current.animationFrames.add(id)
+    return id
+  }, [])
+
+  const trackedCancelAnimationFrame = useCallback((id: number) => {
+    if (typeof window === 'undefined') return
+    trackedResources.current.animationFrames.delete(id)
+    window.cancelAnimationFrame(id)
+  }, [])
+
+  const trackedWindowAddEventListener = useCallback((
+    type: string,
+    listener: EventListenerOrEventListenerObject,
+    options?: boolean | AddEventListenerOptions
+  ) => {
+    if (typeof window === 'undefined') return
+    window.addEventListener(type, listener, options)
+    trackedResources.current.listeners.add({ target: window, type, listener, options })
+  }, [])
+
+  const trackedWindowRemoveEventListener = useCallback((
+    type: string,
+    listener: EventListenerOrEventListenerObject,
+    options?: boolean | EventListenerOptions
+  ) => {
+    if (typeof window === 'undefined') return
+    unregisterListener(window, type, listener, options)
+  }, [unregisterListener])
+
+  const trackedDocumentAddEventListener = useCallback((
+    type: string,
+    listener: EventListenerOrEventListenerObject,
+    options?: boolean | AddEventListenerOptions
+  ) => {
+    if (typeof document === 'undefined') return
+    document.addEventListener(type, listener, options)
+    trackedResources.current.listeners.add({ target: document, type, listener, options })
+  }, [])
+
+  const trackedDocumentRemoveEventListener = useCallback((
+    type: string,
+    listener: EventListenerOrEventListenerObject,
+    options?: boolean | EventListenerOptions
+  ) => {
+    if (typeof document === 'undefined') return
+    unregisterListener(document, type, listener, options)
+  }, [unregisterListener])
+
+  const safeWindow = useMemo(() => {
+    if (typeof window === 'undefined') return undefined
+
+    return new Proxy(window, {
+      get(target, prop) {
+        if (prop === 'setTimeout') return trackedSetTimeout
+        if (prop === 'clearTimeout') return trackedClearTimeout
+        if (prop === 'setInterval') return trackedSetInterval
+        if (prop === 'clearInterval') return trackedClearInterval
+        if (prop === 'requestAnimationFrame') return trackedRequestAnimationFrame
+        if (prop === 'cancelAnimationFrame') return trackedCancelAnimationFrame
+        if (prop === 'addEventListener') return trackedWindowAddEventListener
+        if (prop === 'removeEventListener') return trackedWindowRemoveEventListener
+
+        const value = (target as any)[prop]
+        return typeof value === 'function' ? value.bind(target) : value
+      },
+    })
+  }, [
+    trackedSetTimeout,
+    trackedClearTimeout,
+    trackedSetInterval,
+    trackedClearInterval,
+    trackedRequestAnimationFrame,
+    trackedCancelAnimationFrame,
+    trackedWindowAddEventListener,
+    trackedWindowRemoveEventListener,
+  ])
+
+  const safeDocument = useMemo(() => {
+    if (typeof document === 'undefined') return undefined
+
+    return new Proxy(document, {
+      get(target, prop) {
+        if (prop === 'addEventListener') return trackedDocumentAddEventListener
+        if (prop === 'removeEventListener') return trackedDocumentRemoveEventListener
+
+        const value = (target as any)[prop]
+        return typeof value === 'function' ? value.bind(target) : value
+      },
+    })
+  }, [trackedDocumentAddEventListener, trackedDocumentRemoveEventListener])
+
+  useEffect(() => {
+    return () => {
+      if (typeof window !== 'undefined') {
+        cleanupResources()
+      }
+    }
+  }, [cleanCode, cleanupResources])
+
   // Stable scope object - memoized so useRunner doesn't re-init on every render
   const scope = useMemo(() => {
     // Fallback icon component for any Lucide icon name not explicitly imported
@@ -259,13 +434,19 @@ function ReactRunner({ code, onError }: { code: string; onError?: (error: string
       // Common globals AI code may reference
       Math, Number, String, Array, Object, JSON, Date, Map, Set,
       parseInt, parseFloat, isNaN, isFinite, undefined,
-      console, setTimeout, clearTimeout, setInterval, clearInterval,
+      console,
+      setTimeout: trackedSetTimeout,
+      clearTimeout: trackedClearTimeout,
+      setInterval: trackedSetInterval,
+      clearInterval: trackedClearInterval,
+      addEventListener: trackedWindowAddEventListener,
+      removeEventListener: trackedWindowRemoveEventListener,
       Promise, Error, RegExp, Symbol, Infinity, NaN,
       encodeURIComponent, decodeURIComponent, encodeURI, decodeURI,
-      requestAnimationFrame: typeof window !== 'undefined' ? window.requestAnimationFrame : () => 0,
-      cancelAnimationFrame: typeof window !== 'undefined' ? window.cancelAnimationFrame : () => {},
-      document: typeof document !== 'undefined' ? document : undefined,
-      window: typeof window !== 'undefined' ? window : undefined,
+      requestAnimationFrame: trackedRequestAnimationFrame,
+      cancelAnimationFrame: trackedCancelAnimationFrame,
+      document: safeDocument,
+      window: safeWindow,
 
       // Science data constants (used by AI-generated simulations)
       ELEMENTS,
@@ -277,7 +458,18 @@ function ReactRunner({ code, onError }: { code: string; onError?: (error: string
       aminoAcids: AMINO_ACIDS,
     }
     return s
-  }, [])
+  }, [
+    trackedSetTimeout,
+    trackedClearTimeout,
+    trackedSetInterval,
+    trackedClearInterval,
+    trackedWindowAddEventListener,
+    trackedWindowRemoveEventListener,
+    trackedRequestAnimationFrame,
+    trackedCancelAnimationFrame,
+    safeDocument,
+    safeWindow,
+  ])
 
   const { element, error } = useRunner({ 
     code: cleanCode, 
