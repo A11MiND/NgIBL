@@ -2,40 +2,10 @@
 
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
-import { generateContent, AIProvider, inferProviderFromModel } from "@/lib/ai"
+import { generateContent, AIProvider } from "@/lib/ai"
+import { providerRuntimeNeedsApiKey, resolveProviderRuntime } from "@/lib/provider-runtime"
 
-/**
- * Resolve the AI provider, key, and model based on user settings.
- * If functionModel is set, its provider is inferred from the model ID.
- */
-async function resolveAI(user: any, functionField?: string) {
-  // Determine model first so we can infer provider from it
-  const model = (functionField && user[functionField]) || user.defaultModel || undefined
-  const inferredProvider = model ? inferProviderFromModel(model) : null
-  const provider: AIProvider = inferredProvider || (user.preferredProvider as AIProvider) || 'deepseek'
-  let apiKey: string | undefined
-  let ollamaBaseUrl: string | undefined
-
-  switch (provider) {
-    case 'deepseek':
-      apiKey = process.env.DEEPSEEK_API_KEY || user.deepseekApiKey || undefined
-      break
-    case 'qwen':
-      apiKey = process.env.QWEN_API_KEY || user.qwenApiKey || undefined
-      break
-    case 'gemini':
-      apiKey = process.env.GEMINI_API_KEY || user.geminiApiKey || undefined
-      break
-    case 'ollama':
-      ollamaBaseUrl = user.ollamaBaseUrl || 'http://localhost:11434'
-      apiKey = ''
-      break
-  }
-
-  return { provider, apiKey: apiKey || '', model, ollamaBaseUrl }
-}
-
-export async function testConnectionAction(model: string, apiKey?: string) {
+export async function testConnectionAction(model: string) {
   const session = await auth()
   if (!session?.user?.email) {
     throw new Error("Unauthorized")
@@ -43,47 +13,19 @@ export async function testConnectionAction(model: string, apiKey?: string) {
 
   const user = await prisma.user.findUnique({
     where: { email: session.user.email },
-    select: { geminiApiKey: true, deepseekApiKey: true, qwenApiKey: true, ollamaBaseUrl: true }
+    select: { geminiApiKey: true, deepseekApiKey: true, qwenApiKey: true, ollamaBaseUrl: true, modelProviders: true, preferredProvider: true, defaultModel: true }
   })
 
   if (!user) throw new Error("User not found")
 
   // Determine provider and key
-  let provider: AIProvider = 'deepseek'
-  if (model.toLowerCase().includes('gemini')) {
-    provider = 'gemini'
-  } else if (model.toLowerCase().includes('deepseek')) {
-    provider = 'deepseek'
-  } else if (model.toLowerCase().includes('qwen')) {
-    provider = 'qwen'
-  } else if (user.ollamaBaseUrl) {
-    // Unknown model name + Ollama configured → likely an Ollama model
-    provider = 'ollama'
-  } else {
-    // Fallback based on available keys
-    provider = user.deepseekApiKey ? 'deepseek' : user.qwenApiKey ? 'qwen' : 'gemini'
-  }
+  const runtime = resolveProviderRuntime({ user, explicitModel: model })
+  const provider: AIProvider = runtime.provider
+  const effectiveApiKey = runtime.apiKey
+  const ollamaBaseUrl = runtime.ollamaBaseUrl
+  const baseUrl = runtime.baseUrl
 
-  let effectiveApiKey: string | undefined
-  let ollamaBaseUrl: string | undefined
-
-  switch (provider) {
-    case 'deepseek':
-      effectiveApiKey = process.env.DEEPSEEK_API_KEY || user.deepseekApiKey || undefined
-      break
-    case 'qwen':
-      effectiveApiKey = user.qwenApiKey || undefined
-      break
-    case 'gemini':
-      effectiveApiKey = process.env.GEMINI_API_KEY || user.geminiApiKey || undefined
-      break
-    case 'ollama':
-      ollamaBaseUrl = user.ollamaBaseUrl || 'http://localhost:11434'
-      effectiveApiKey = ''
-      break
-  }
-
-  if (!effectiveApiKey && provider !== 'ollama') {
+  if (!effectiveApiKey && providerRuntimeNeedsApiKey(runtime)) {
     throw new Error("No API key found for the selected model. Please configure it in your user settings.")
   }
 
@@ -92,11 +34,11 @@ export async function testConnectionAction(model: string, apiKey?: string) {
       "Hello, this is a test connection. Reply with 'Connection successful!'",
       effectiveApiKey || '',
       provider,
-      { model, ollamaBaseUrl }
+      { model, ollamaBaseUrl, baseUrl }
     )
     return { success: true, message: response }
-  } catch (error: any) {
-    return { success: false, message: error.message }
+  } catch (error: unknown) {
+    return { success: false, message: error instanceof Error ? error.message : "Connection test failed" }
   }
 }
 
@@ -121,13 +63,15 @@ export async function generateWorksheetQuestionsAction(data: {
       qwenApiKey: true,
       geminiApiKey: true,
       ollamaBaseUrl: true,
+      modelProviders: true,
     },
   })
   if (!user) throw new Error("User not found")
 
-  const { provider, apiKey, model, ollamaBaseUrl } = await resolveAI(user, 'analysisModel')
+  const runtime = await resolveProviderRuntime({ user, functionField: 'analysisModel' })
+  const { provider, apiKey, model, ollamaBaseUrl, baseUrl } = runtime
 
-  if (!apiKey && provider !== 'ollama') {
+  if (!apiKey && providerRuntimeNeedsApiKey(runtime)) {
     return { success: false, error: "No API key configured. Go to Settings to add one." }
   }
 
@@ -162,7 +106,7 @@ Example:
 Generate exactly ${count} questions. Return ONLY the JSON array, no other text.`
 
   try {
-    const response = await generateContent(prompt, apiKey, provider, { model, ollamaBaseUrl })
+    const response = await generateContent(prompt, apiKey, provider, { model, ollamaBaseUrl, baseUrl })
 
     // Extract JSON array from response
     const jsonMatch = response.match(/\[[\s\S]*\]/)
@@ -176,14 +120,15 @@ Generate exactly ${count} questions. Return ONLY the JSON array, no other text.`
     }
 
     // Validate and clean
-    const cleaned = questions.map((q: any) => ({
+    const cleaned = questions.map((q: Record<string, unknown>) => ({
       type: ["SHORT", "LONG", "MCQ", "FILL_IN"].includes(q.type) ? q.type : "SHORT",
       question: String(q.question || ""),
       options: q.type === "MCQ" && Array.isArray(q.options) ? q.options.map(String) : null,
-    })).filter((q: any) => q.question.length > 0)
+    })).filter((q: { question: string }) => q.question.length > 0)
 
     return { success: true, questions: cleaned }
-  } catch (error: any) {
-    return { success: false, error: error.message?.substring(0, 200) || "Generation failed" }
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Generation failed"
+    return { success: false, error: message.substring(0, 200) || "Generation failed" }
   }
 }

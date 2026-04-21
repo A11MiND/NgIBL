@@ -101,6 +101,7 @@ AVAILABLE (already in scope — do NOT import):
 - Charts (Recharts): LineChart, BarChart, AreaChart, ScatterChart, Line, Bar, Area, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 - Icons (Lucide): Play, Pause, RotateCcw, Plus, Minus, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, RefreshCw, Info, Check, X, Zap, Thermometer, Sun, Moon, Atom, Eye, EyeOff, AlertCircle, Sparkles, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Settings, Droplets, Wind, FlaskConical, Ruler, Timer, Volume2, VolumeX, HelpCircle
 - Animation: motion (framer-motion-like, e.g. <motion.div animate={{x: 100}}>)
+- Physics engine: Matter (matter.js) with common modules exposed: Engine, Runner, Render, World, Bodies, Body, Composite, Composites, Constraint, Mouse, MouseConstraint, Events, Vector
 - Globals: Math, JSON, console, setTimeout, setInterval, requestAnimationFrame, cancelAnimationFrame, document, window, parseInt, parseFloat
 
 SLIDER API (important — not standard HTML):
@@ -113,6 +114,7 @@ CRITICAL RULES:
 4. Use simple controls: a few sliders and buttons, not complex forms.
 5. Prefer standard HTML <button> elements over the Button component for simplicity.
 6. For physics: store position/velocity in useRef, use requestAnimationFrame for animation.
+6.1 For collision-heavy physics simulations (e.g. gravity, collisions, rigid bodies), prefer Matter.js and clean up Engine/Runner on unmount.
 7. ALWAYS render the initial state immediately on mount — don't wait for Play to be clicked.
 8. Do NOT remove existing features, axes, ticks, labels, or controls to shorten the code. Preserve all functionality.
 
@@ -190,6 +192,7 @@ interface GenerateOptions {
   provider?: AIProvider
   model?: string
   ollamaBaseUrl?: string
+  baseUrl?: string
   images?: string[]
   history?: Array<{ role: 'user' | 'assistant'; content: string }>
   historySummary?: string
@@ -236,6 +239,7 @@ async function generateAndNormalize(params: {
   provider: AIProvider
   model?: string
   ollamaBaseUrl?: string
+  baseUrl?: string
   temperature: number
   type: 'REACT' | 'GEOGEBRA_API'
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>
@@ -245,6 +249,7 @@ async function generateAndNormalize(params: {
     temperature: params.temperature,
     model: params.model,
     ollamaBaseUrl: params.ollamaBaseUrl,
+    baseUrl: params.baseUrl,
     images: params.images,
     messages: params.messages,
   })
@@ -257,6 +262,7 @@ async function generateAndNormalize(params: {
     temperature: Math.min(params.temperature, 0.3),
     model: params.model,
     ollamaBaseUrl: params.ollamaBaseUrl,
+    baseUrl: params.baseUrl,
     messages: [
       ...params.messages,
       {
@@ -270,6 +276,37 @@ async function generateAndNormalize(params: {
   })
 
   extracted = extractCode(strictRaw, params.type)
+  if (isValidGeneratedOutput(extracted, params.type)) return extracted
+
+  // Final fallback: force a tiny, deterministic skeleton for weaker models.
+  const fallbackRaw = await generateContent('', params.apiKey, params.provider, {
+    temperature: 0,
+    model: params.model,
+    ollamaBaseUrl: params.ollamaBaseUrl,
+    baseUrl: params.baseUrl,
+    messages: [
+      ...params.messages,
+      {
+        role: 'user',
+        content:
+          params.type === 'REACT'
+            ? [
+              'Your previous outputs were invalid.',
+              'Return ONLY valid React code with this exact outer shape:',
+              'export default function Simulation() { ... return ( ... ) }',
+              'No markdown. No explanations. No imports. No comments.',
+              'Use at least one interactive control (Slider or button) and ensure initial render works immediately.',
+            ].join('\n')
+            : [
+              'Your previous outputs were invalid.',
+              'Return ONLY valid JSON object with keys: commands (array), settings (object).',
+              'No markdown. No explanations.',
+            ].join('\n'),
+      },
+    ],
+  })
+
+  extracted = extractCode(fallbackRaw, params.type)
   return extracted
 }
 
@@ -297,6 +334,7 @@ export async function generateSimulation(
       provider,
       model: options.model,
       ollamaBaseUrl: options.ollamaBaseUrl,
+      baseUrl: options.baseUrl,
       images: options.images,
       temperature: options.temperature ?? 0.7,
       type,
@@ -351,6 +389,7 @@ export async function refineSimulation(
       provider,
       model: options.model,
       ollamaBaseUrl: options.ollamaBaseUrl,
+      baseUrl: options.baseUrl,
       images: options.images,
       temperature: options.temperature ?? 0.7,
       type,
@@ -404,6 +443,7 @@ CRITICAL: Return ONLY the complete fixed ${type === 'REACT' ? 'component code (e
       provider,
       model: options.model,
       ollamaBaseUrl: options.ollamaBaseUrl,
+      baseUrl: options.baseUrl,
       temperature: 0.3,
       type,
       messages: [
@@ -433,7 +473,7 @@ CRITICAL: Return ONLY the complete fixed ${type === 'REACT' ? 'component code (e
 export async function summarizeHistory(
   messages: Array<{ role: 'user' | 'assistant'; content: string }>,
   apiKey: string,
-  options: Pick<GenerateOptions, 'provider' | 'model' | 'ollamaBaseUrl'>
+  options: Pick<GenerateOptions, 'provider' | 'model' | 'ollamaBaseUrl' | 'baseUrl'>
 ): Promise<string> {
   const provider = options.provider || 'deepseek'
   const transcript = messages
@@ -443,6 +483,7 @@ export async function summarizeHistory(
     temperature: 0.3,
     model: options.model,
     ollamaBaseUrl: options.ollamaBaseUrl,
+    baseUrl: options.baseUrl,
     messages: [
       { role: 'system', content: 'Summarize the following simulation editing conversation in 2-3 sentences. Focus on what features were added, changed, or removed. Be concise and factual.' },
       { role: 'user', content: transcript },
@@ -465,6 +506,7 @@ export async function generateDescription(
       temperature: 0.5,
       model: options.model,
       ollamaBaseUrl: options.ollamaBaseUrl,
+      baseUrl: options.baseUrl,
       messages: [
         { role: 'system', content: 'You are a helpful assistant. Summarize the following simulation code in 1-2 concise sentences for a teacher audience. State what the simulation does and what concepts it demonstrates. Reply with ONLY the description text, no quotes, no prefix.' },
         { role: 'user', content: `Subject: ${subject}\n\nCode:\n${code.substring(0, 3000)}` }
@@ -500,6 +542,7 @@ export async function analyzeStudentAnswers(
       temperature: 0.4,
       model: options.model,
       ollamaBaseUrl: options.ollamaBaseUrl,
+      baseUrl: options.baseUrl,
       messages: [
         {
           role: 'system',

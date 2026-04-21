@@ -35,6 +35,8 @@ model User {
   qwenApiKey     String?
   ollamaBaseUrl  String?  // default http://localhost:11434
   preferredProvider String? // gemini | deepseek | qwen | ollama
+  modelProviders Json? // dynamic provider templates + user API credentials/config
+  deepseekCredits Int @default(200) // starter credits that can be customized in settings
   defaultModel   String?  // e.g. deepseek-chat, qwen-plus, gemini-1.5-flash
 
   // Per-function model overrides

@@ -4,7 +4,21 @@ import { prisma } from "@/lib/prisma"
 import { generateContent, AIProvider } from "@/lib/ai"
 import { getRAGContext } from "@/lib/rag"
 import { rateLimit } from "@/lib/rate-limit"
-import { logger, logAI } from "@/lib/logger"
+import { logAI } from "@/lib/logger"
+import { providerRuntimeNeedsApiKey, resolveProviderRuntime } from "@/lib/provider-runtime"
+
+type TutorUser = {
+  id: string
+  chatbotModel?: string | null
+  geminiApiKey?: string | null
+  deepseekApiKey?: string | null
+  qwenApiKey?: string | null
+  ollamaBaseUrl?: string | null
+  modelProviders?: unknown
+  preferredProvider?: string | null
+  defaultModel?: string | null
+  [key: string]: unknown
+}
 
 export async function chatWithTutor(
   experimentId: string,
@@ -23,7 +37,7 @@ export async function chatWithTutor(
     throw new Error("Experiment not found")
   }
 
-  const user = experiment.user as any
+  const user = experiment.user as unknown as TutorUser
   const hasImages = images && images.length > 0
 
   // ─── Rate Limiting ──────────────────────────────────────────────
@@ -33,60 +47,39 @@ export async function chatWithTutor(
   }
 
   // Use per-function chatbotModel override > experiment aiModel > default
-  let baseModel = (user.chatbotModel || experiment.aiModel) as string
+  const baseModel = String(user.chatbotModel || experiment.aiModel || "deepseek-chat")
 
-  // Determine provider — if images present, force qwen3-vl-plus for vision
-  let provider: AIProvider = 'deepseek'
-  let model = baseModel
+  let provider: AIProvider
+  let model: string
+  let effectiveApiKey: string
+  let ollamaBaseUrl: string | undefined
+  let baseUrl: string | undefined
+  let runtimeNeedsApiKey = true
 
-  if (hasImages) {
-    // Force vision model
-    provider = 'qwen'
-    model = 'qwen3-vl-plus'
-  } else if (model.toLowerCase().includes('gemini')) {
-    provider = 'gemini'
-  } else if (model.toLowerCase().includes('qwen')) {
-    provider = 'qwen'
-  } else if (model.toLowerCase().includes('deepseek')) {
-    provider = 'deepseek'
-  } else if (model.toLowerCase().includes('ollama') || model.includes(':')) {
-    provider = 'ollama'
+  try {
+    const runtime = resolveProviderRuntime({
+      user,
+      functionField: 'chatbotModel',
+      explicitModel: hasImages ? 'qwen3-vl-plus' : baseModel,
+    })
+
+    provider = runtime.provider
+    model = runtime.model || (hasImages ? 'qwen3-vl-plus' : baseModel)
+    effectiveApiKey = runtime.apiKey
+    ollamaBaseUrl = runtime.ollamaBaseUrl
+    baseUrl = runtime.baseUrl
+    runtimeNeedsApiKey = providerRuntimeNeedsApiKey(runtime)
+  } catch {
+    return hasImages
+      ? "Image recognition requires a Qwen-compatible model provider/API key. Please ask your teacher to configure it in Settings."
+      : "I'm sorry, but the AI tutor is not configured for this experiment yet. Please ask your teacher to set up API keys or model providers."
   }
 
-  // Get API Key based on provider
-  let effectiveApiKey: string | null | undefined
-
-  if (provider === 'qwen') {
-    effectiveApiKey = user.qwenApiKey
-  } else if (provider === 'deepseek') {
-    effectiveApiKey = process.env.DEEPSEEK_API_KEY || user.deepseekApiKey
-  } else if (provider === 'gemini') {
-    effectiveApiKey = process.env.GEMINI_API_KEY || user.geminiApiKey
-  } else if (provider === 'ollama') {
-    effectiveApiKey = 'ollama' // Ollama doesn't need a key
-  }
-
-  // Fallback logic (only when no images — can't fallback vision)
-  if (!effectiveApiKey && !hasImages) {
-    if (provider === 'deepseek' && user.geminiApiKey) {
-      provider = 'gemini'
-      effectiveApiKey = process.env.GEMINI_API_KEY || user.geminiApiKey
-      model = 'gemini-1.5-flash'
-    } else {
-      const deepseekKey = process.env.DEEPSEEK_API_KEY || user.deepseekApiKey
-      if (deepseekKey) {
-        provider = 'deepseek'
-        effectiveApiKey = deepseekKey
-        model = 'deepseek-chat'
-      }
-    }
-  }
-
-  if (!effectiveApiKey) {
+  if (!effectiveApiKey && runtimeNeedsApiKey) {
     if (hasImages) {
-      return "Image recognition requires a Qwen API key. Please ask your teacher to configure it in Settings."
+      return "Image recognition requires a Qwen-compatible model provider/API key. Please ask your teacher to configure it in Settings."
     }
-    return "I'm sorry, but the AI tutor is not configured for this experiment yet. Please ask your teacher to set up the API keys."
+    return "I'm sorry, but the AI tutor is not configured for this experiment yet. Please ask your teacher to set up API keys or model providers."
   }
 
   // ─── RAG: Semantic search for relevant context ──────────────────
@@ -107,18 +100,20 @@ export async function chatWithTutor(
     ? `${systemInstructions}\n\nContext/Knowledge Base:\n${knowledge}\n\nThe student has attached image(s). Analyze the image content carefully and respond in the context of this experiment.`
     : `${systemInstructions}\n\nContext/Knowledge Base:\n${knowledge}`
 
-  const messages: any[] = [
+  const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
     { role: 'system', content: fullSystemPrompt },
     ...history.map(msg => ({ role: msg.role === 'user' ? 'user' : 'assistant', content: msg.content })),
     { role: 'user', content: message || "Please look at the image(s) I've attached and help me." }
   ]
 
   try {
-    const response = await generateContent("", effectiveApiKey!, provider!, {
+    const response = await generateContent("", effectiveApiKey, provider, {
       temperature: experiment.temperature,
       model: model,
       messages: messages,
       images: hasImages ? images : undefined,
+      ollamaBaseUrl,
+      baseUrl,
     })
 
     logAI('chatbot', {
@@ -128,13 +123,14 @@ export async function chatWithTutor(
     })
 
     return response
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Unknown error occurred"
     logAI('chatbot', {
       provider,
       model,
       duration: Date.now() - startTime,
-      error: error.message,
+      error: message,
     })
-    return `Error: ${error.message || "Unknown error occurred"}`
+    return `Error: ${message}`
   }
 }

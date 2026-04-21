@@ -1,7 +1,9 @@
 "use client"
+/* eslint-disable @typescript-eslint/no-explicit-any, react/display-name, @typescript-eslint/no-unused-vars */
 
 import { useRunner } from "react-runner"
 import React, { useEffect, useRef, useMemo, useCallback } from "react"
+import * as Matter from "matter-js"
 import { Play, Pause, RotateCcw, Settings, AlertCircle, Sparkles, Plus, Minus, ArrowRight, ArrowLeft, ArrowUp, ArrowDown, RefreshCw, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Info, HelpCircle, Check, X, Zap, Thermometer, Droplets, Wind, Sun, Moon, Atom, FlaskConical, Ruler, Timer, Eye, EyeOff, Volume2, VolumeX } from "lucide-react"
 import { 
   LineChart, BarChart, AreaChart, ScatterChart,
@@ -166,12 +168,16 @@ export default function SimulationRunner({ simulation, onError }: SimulationRunn
     )
   }
 
-  if (simulation.type === "GEOGEBRA_FILE" && simulation.geogebraFile) {
-    return <GeoGebraFileRunner fileUrl={simulation.geogebraFile} settings={simulation.geogebraSettings} />
-  }
-
-  if (simulation.type === "GEOGEBRA_API") {
-    return <GeoGebraAPIRunner commands={simulation.geogebraCommands} settings={simulation.geogebraSettings} />
+  if (simulation.type === "GEOGEBRA_FILE" || simulation.type === "GEOGEBRA_API") {
+    return (
+      <div className="flex h-full min-h-[260px] items-center justify-center text-gray-600 sm:min-h-[320px]">
+        <div className="text-center max-w-md px-6">
+          <AlertCircle className="h-12 w-12 mx-auto mb-4 text-amber-500" />
+          <p className="font-medium">GeoGebra simulations are no longer supported.</p>
+          <p className="mt-2 text-sm text-muted-foreground">Please regenerate this simulation as React in Sandbox.</p>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -374,6 +380,22 @@ function ReactRunner({ code, onError }: { code: string; onError?: (error: string
 
   // Stable scope object - memoized so useRunner doesn't re-init on every render
   const scope = useMemo(() => {
+    const {
+      Engine,
+      Runner,
+      Render,
+      World,
+      Bodies,
+      Body,
+      Composite,
+      Composites,
+      Constraint,
+      Mouse,
+      MouseConstraint,
+      Events,
+      Vector,
+    } = Matter
+
     // Fallback icon component for any Lucide icon name not explicitly imported
     const FallbackIcon = ({ className, ...props }: any) =>
       React.createElement('svg', {
@@ -410,6 +432,22 @@ function ReactRunner({ code, onError }: { code: string; onError?: (error: string
 
       // motion shim
       motion,
+
+      // Matter.js physics
+      Matter,
+      Engine,
+      Runner,
+      Render,
+      World,
+      Bodies,
+      Body,
+      Composite,
+      Composites,
+      Constraint,
+      Mouse,
+      MouseConstraint,
+      Events,
+      Vector,
 
       // Common Lucide icons
       Play, Pause, RotateCcw, Settings, AlertCircle, Sparkles, Plus, Minus,
@@ -502,150 +540,3 @@ function ReactRunner({ code, onError }: { code: string; onError?: (error: string
   )
 }
 
-/**
- * Lazy-load GeoGebra deployggb.js only when needed (backward compat for saved sims)
- */
-function loadGeoGebraScript(): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if ((window as any).GGBApplet) {
-      resolve()
-      return
-    }
-    const s = document.createElement('script')
-    s.src = 'https://www.geogebra.org/apps/deployggb.js'
-    s.onload = () => resolve()
-    s.onerror = () => reject(new Error('Failed to load GeoGebra script'))
-    document.head.appendChild(s)
-  })
-}
-
-function GeoGebraFileRunner({ fileUrl, settings }: { fileUrl: string; settings?: any }) {
-  const containerRef = useRef<HTMLDivElement>(null)
-  
-  useEffect(() => {
-    if (!containerRef.current || typeof window === 'undefined') return
-    let cancelled = false
-    
-    loadGeoGebraScript().then(() => {
-      if (cancelled || !containerRef.current) return
-      
-      const containerWidth = containerRef.current?.clientWidth || 800
-      const containerHeight = containerRef.current?.clientHeight || 600
-      const params = {
-        filename: fileUrl,
-        width: settings?.width || containerWidth,
-        height: settings?.height || containerHeight,
-        showToolBar: settings?.showToolBar ?? false,
-        showAlgebraInput: settings?.showAlgebraInput ?? false,
-        showMenuBar: settings?.showMenuBar ?? false,
-        ...settings
-      }
-      
-      const applet = new (window as any).GGBApplet(params, true)
-      applet.inject(containerRef.current)
-    }).catch(console.error)
-
-    return () => {
-      cancelled = true
-      if (containerRef.current) containerRef.current.innerHTML = ''
-    }
-  }, [fileUrl, settings])
-  
-  return <div ref={containerRef} className="h-full min-h-[320px] w-full sm:min-h-[420px]" />
-}
-
-function GeoGebraAPIRunner({ commands, settings }: { commands?: any; settings?: any }) {
-  const containerRef = useRef<HTMLDivElement>(null)
-  const [error, setError] = React.useState<string | null>(null)
-  const [loading, setLoading] = React.useState(true)
-  const appletId = React.useRef(`ggb_${Math.random().toString(36).slice(2, 8)}`)
-  
-  useEffect(() => {
-    if (!containerRef.current || typeof window === 'undefined') return
-    let cancelled = false
-    
-    loadGeoGebraScript().then(() => {
-      if (cancelled || !containerRef.current) return
-      
-      try {
-        const commandList = Array.isArray(commands?.commands) ? commands.commands : 
-                            Array.isArray(commands) ? commands : []
-        const geoSettings = commands?.settings || settings || {}
-        
-        const containerId = appletId.current
-
-        const containerWidth = containerRef.current?.clientWidth || 800
-        const containerHeight = containerRef.current?.clientHeight || 600
-        const params = {
-          appName: "classic",
-          width: geoSettings.width || containerWidth,
-          height: geoSettings.height || containerHeight,
-          showToolBar: geoSettings.showToolBar ?? false,
-          showAlgebraInput: geoSettings.showAlgebraInput ?? true,
-          showMenuBar: geoSettings.showMenuBar ?? false,
-          id: containerId,
-          appletOnLoad: () => {
-            if (cancelled) return
-            setLoading(false)
-            const api = (window as any)[containerId] || (window as any).ggbApplet
-            if (api && commandList.length > 0) {
-              const errors: string[] = []
-              commandList.forEach((cmd: string) => {
-                try {
-                  const success = api.evalCommand(cmd)
-                  if (!success) errors.push(`Failed: ${cmd}`)
-                } catch (e: any) {
-                  errors.push(`Error in "${cmd}": ${e.message}`)
-                }
-              })
-              if (errors.length > commandList.length / 2) {
-                setError(`Some commands failed:\\n${errors.join('\\n')}`)
-              }
-            }
-          },
-          ...geoSettings
-        }
-        
-        const applet = new (window as any).GGBApplet(params, true)
-        containerRef.current.innerHTML = ''
-        applet.inject(containerRef.current)
-      } catch (e: any) {
-        setError(e.message || 'Failed to initialize GeoGebra')
-        setLoading(false)
-      }
-    }).catch(err => {
-      setError('GeoGebra script failed to load. Please refresh.')
-      setLoading(false)
-    })
-
-    return () => {
-      cancelled = true
-      // Cleanup: remove applet global + clear DOM
-      try { delete (window as any)[appletId.current] } catch {}
-      if (containerRef.current) containerRef.current.innerHTML = ''
-    }
-  }, [commands, settings])
-  
-  if (error) {
-    return (
-      <div className="p-4 bg-red-50 text-red-600 rounded-md">
-        <h3 className="font-bold mb-2">GeoGebra Error</h3>
-        <pre className="text-xs font-mono whitespace-pre-wrap">{error}</pre>
-      </div>
-    )
-  }
-  
-  return (
-    <div className="relative">
-      {loading && (
-        <div className="absolute inset-0 flex items-center justify-center bg-gray-50 rounded-lg z-10">
-          <div className="text-center text-sm text-muted-foreground">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-2" />
-            Loading GeoGebra...
-          </div>
-        </div>
-      )}
-      <div ref={containerRef} className="h-full min-h-[320px] w-full sm:min-h-[420px]" />
-    </div>
-  )
-}

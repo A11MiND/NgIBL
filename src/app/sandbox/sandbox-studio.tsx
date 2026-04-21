@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useRef, useEffect, useCallback, useMemo } from "react"
+import React, { useState, useRef, useEffect, useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { 
   Sparkles, Send, Loader2, Save, AlertCircle, 
-  Code, Eye, Wrench, RotateCcw, History, ChevronDown, ChevronUp,
+  Code, Eye, Wrench, RotateCcw, History,
   ImagePlus, X
 } from "lucide-react"
 import { 
@@ -20,6 +20,7 @@ import {
   healSimulationAction,
   generateDescriptionAction,
   persistCheckpointAction,
+  rewritePromptAction,
 } from "./actions"
 import SimulationRunner from "@/components/simulation-runner"
 import { useRouter } from "next/navigation"
@@ -39,12 +40,12 @@ interface VersionEntry {
   timestamp: number
   prompt?: string
   kind?: 'version' | 'checkpoint'
-  type?: 'REACT' | 'GEOGEBRA_API'
+  type?: 'REACT'
 }
 
 interface CheckpointEntry {
   code: string
-  type: 'REACT' | 'GEOGEBRA_API'
+  type: 'REACT'
   timestamp: number
   reason: string
   persisted?: boolean
@@ -55,7 +56,7 @@ interface InitialSimulation {
   title: string
   description: string | null
   subject: string
-  type: 'REACT' | 'GEOGEBRA_API'
+  type: 'REACT'
   code: string
   versionHistory: VersionEntry[]
   chatHistory?: Message[] | null
@@ -95,9 +96,10 @@ export default function SandboxStudio({
   
   // Creation state
   const [step, setStep] = useState<'setup' | 'chat'>(isEditing ? 'chat' : 'setup')
-  const [simulationType, setSimulationType] = useState<'REACT' | 'GEOGEBRA_API'>(initialSimulation?.type || 'REACT')
+  const [simulationType] = useState<'REACT'>(initialSimulation?.type || 'REACT')
   const [subject, setSubject] = useState(initialSimulation?.subject || 'Physics')
   const [initialPrompt, setInitialPrompt] = useState('')
+  const [rewritingPrompt, setRewritingPrompt] = useState(false)
   
   // Chat state
   const [messages, setMessages] = useState<Message[]>(
@@ -114,8 +116,8 @@ export default function SandboxStudio({
   
   // Simulation state
   const [currentCode, setCurrentCode] = useState(initialSimulation?.code || '')
-  const [currentType, setCurrentType] = useState<'REACT' | 'GEOGEBRA_API'>(initialSimulation?.type || 'REACT')
-  const [variables, setVariables] = useState<any[]>([])
+  const [currentType, setCurrentType] = useState<'REACT'>(initialSimulation?.type || 'REACT')
+  const [variables, setVariables] = useState<unknown[]>([])
   const [previewError, setPreviewError] = useState<string | null>(null)
   const [healing, setHealing] = useState(false)
   const [healAttempts, setHealAttempts] = useState(0)
@@ -392,15 +394,13 @@ export default function SandboxStudio({
     if (isStaleRun(runId)) return
     
     if (result.success && result.code) {
-      setRunStage('Rendering generated simulation...')
-      setRunProgress(96)
       const cleaned = cleanCode(result.code)
       setCurrentCode(cleaned)
       setCurrentType(result.type!)
       setVariables(result.variables || [])
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: `✨ Generated your ${simulationType === 'REACT' ? 'React' : 'GeoGebra'} simulation! Check the preview on the right.\n\nDescribe any changes you'd like to make.`
+        content: '✨ Generated your React simulation! Check the preview on the right.\n\nDescribe any changes you\'d like to make.'
       }])
     } else {
       setMessages(prev => [...prev, {
@@ -410,6 +410,29 @@ export default function SandboxStudio({
     }
     
     finishRun(runId)
+  }
+
+  async function handleRewritePrompt() {
+    const raw = initialPrompt.trim()
+    if (!raw || rewritingPrompt) return
+    setRewritingPrompt(true)
+    try {
+      const result = await rewritePromptAction(raw, subject)
+      if (result.success && result.rewrittenPrompt) {
+        setInitialPrompt(result.rewrittenPrompt)
+      } else if (result.error) {
+        setMessages((prev) => [...prev, {
+          role: 'system',
+          content: `⚠️ Prompt rewrite failed: ${result.error}`,
+        }])
+      }
+    } catch {
+      setMessages((prev) => [...prev, {
+        role: 'system',
+        content: '⚠️ Prompt rewrite failed. Please try again.',
+      }])
+    }
+    setRewritingPrompt(false)
   }
   
   // Handle refinement
@@ -517,15 +540,6 @@ export default function SandboxStudio({
     setSaving(true)
     
     try {
-      let geoCommands = undefined
-      if (currentType === 'GEOGEBRA_API') {
-        try {
-          geoCommands = JSON.parse(currentCode)
-        } catch {
-          geoCommands = { commands: [currentCode] }
-        }
-      }
-
       // Build version history entry
       const unsavedCheckpointVersions: VersionEntry[] = checkpoints
         .filter((cp) => !cp.persisted)
@@ -552,9 +566,8 @@ export default function SandboxStudio({
         title: saveTitle,
         description: saveDescription,
         subject: subject,
-        type: currentType === 'REACT' ? 'REACT' as const : 'GEOGEBRA_API' as const,
-        reactCode: currentType === 'REACT' ? currentCode : undefined,
-        geogebraCommands: geoCommands,
+        type: 'REACT' as const,
+        reactCode: currentCode,
         variables: variables,
         isPublic: savePublic,
         simulationId: isEditing ? initialSimulation!.id : undefined,
@@ -576,8 +589,8 @@ export default function SandboxStudio({
       } else {
         alert('Failed to save: ' + result.error)
       }
-    } catch (error: any) {
-      alert('Failed to save: ' + error.message)
+    } catch (error: unknown) {
+      alert('Failed to save: ' + (error instanceof Error ? error.message : 'Unknown error'))
     } finally {
       setSaving(false)
     }
@@ -617,17 +630,7 @@ export default function SandboxStudio({
 
     return {
       type: currentType,
-      reactCode: currentType === 'REACT' ? currentCode : null,
-      geogebraCommands:
-        currentType === 'GEOGEBRA_API'
-          ? (() => {
-              try {
-                return JSON.parse(currentCode)
-              } catch {
-                return { commands: [currentCode] }
-              }
-            })()
-          : null,
+      reactCode: currentCode,
     }
   }, [currentCode, currentType])
   
@@ -723,14 +726,27 @@ export default function SandboxStudio({
                 </TabsList>
 
                 <TabsContent value="describe" className="space-y-2 mt-3">
-                  <Textarea 
-                    placeholder="E.g., Create a car collision simulation where two cars move toward each other. Show momentum conservation with sliders for mass and velocity."
-                    value={initialPrompt}
-                    onChange={(e) => setInitialPrompt(e.target.value)}
-                    onPaste={imageUpload.handlePaste}
-                    rows={4}
-                    className="resize-none text-base"
-                  />
+                  <div className="relative">
+                    <Textarea
+                      placeholder="E.g., Create a car collision simulation where two cars move toward each other. Show momentum conservation with sliders for mass and velocity."
+                      value={initialPrompt}
+                      onChange={(e) => setInitialPrompt(e.target.value)}
+                      onPaste={imageUpload.handlePaste}
+                      rows={4}
+                      className="resize-none text-base pr-12"
+                    />
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="icon"
+                      className="absolute bottom-2 right-2 h-8 w-8 shadow-sm"
+                      onClick={handleRewritePrompt}
+                      disabled={!initialPrompt.trim() || rewritingPrompt}
+                      title="Rewrite prompt with AI"
+                    >
+                      {rewritingPrompt ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                    </Button>
+                  </div>
                   <div className="flex items-center gap-2">
                     <Button
                       type="button"
@@ -837,7 +853,7 @@ export default function SandboxStudio({
       
       {/* Left: Chat Panel */}
       <div className={cn(
-        "w-full min-h-0 border-r bg-muted/30 md:flex md:w-[360px] md:min-w-[300px] md:shrink-0 md:flex-col lg:w-[380px] lg:min-w-[320px]",
+        "w-full min-h-0 border-r bg-muted/30 md:flex md:w-[420px] md:min-w-[340px] md:shrink-0 md:flex-col lg:w-[460px] lg:min-w-[360px]",
         mobileTab !== 'chat' && "hidden md:flex"
       )}>
         <div className="p-3 border-b bg-background flex items-center justify-between">
@@ -1113,10 +1129,12 @@ export default function SandboxStudio({
           <TabsContent value="preview" className="m-0 flex min-h-0 flex-1 flex-col overflow-hidden p-3 sm:p-4">
             {currentCode ? (
               <div className="min-h-0 flex-1 overflow-auto rounded-lg border bg-background p-2 sm:p-3">
-                <MemoSimulationRunner
-                  simulation={previewSimulation}
-                  onError={setPreviewError}
-                />
+                <div className="mx-auto min-h-full w-full max-w-[980px]">
+                  <MemoSimulationRunner
+                    simulation={previewSimulation}
+                    onError={setPreviewError}
+                  />
+                </div>
               </div>
             ) : (
               <div className="flex items-center justify-center h-full text-muted-foreground">
@@ -1129,9 +1147,11 @@ export default function SandboxStudio({
           </TabsContent>
           
           <TabsContent value="code" className="m-0 flex min-h-0 flex-1 p-3 sm:p-4">
-            <pre className="h-full min-h-0 flex-1 overflow-auto rounded-lg bg-muted p-4 font-mono text-xs leading-relaxed">
-              <code>{currentCode || 'No code yet'}</code>
-            </pre>
+            <div className="min-h-0 flex-1 overflow-auto rounded-lg border bg-background p-2 sm:p-3">
+              <pre className="mx-auto h-full min-h-0 w-full max-w-[980px] overflow-auto rounded-md bg-muted p-4 font-mono text-xs leading-relaxed">
+                <code>{currentCode || 'No code yet'}</code>
+              </pre>
+            </div>
           </TabsContent>
         </Tabs>
       </div>

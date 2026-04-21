@@ -3,61 +3,54 @@
 import { auth } from '@/auth'
 import { prisma } from '@/lib/prisma'
 import { generateSimulation, refineSimulation, healSimulation, generateDescription, summarizeHistory } from '@/lib/ai-simulation'
-import { AIProvider, inferProviderFromModel } from '@/lib/ai'
+import { AIProvider, generateContent } from '@/lib/ai'
+import { logger } from '@/lib/logger'
 import { revalidatePath } from 'next/cache'
+import { Prisma } from '@prisma/client'
+import { resolveProviderRuntime } from '@/lib/provider-runtime'
+
+type ProviderUser = {
+  preferredProvider?: string | null
+  defaultModel?: string | null
+  deepseekApiKey?: string | null
+  qwenApiKey?: string | null
+  geminiApiKey?: string | null
+  ollamaBaseUrl?: string | null
+  [key: string]: unknown
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback
+}
+
+function toOptionalJson(value: unknown): Prisma.InputJsonValue | Prisma.NullTypes.JsonNull | undefined {
+  if (value === undefined) return undefined
+  if (value === null) return Prisma.JsonNull
+  return value as Prisma.InputJsonValue
+}
 
 /**
  * Resolve the user's preferred AI provider, API key, model, and function-specific override.
  */
 async function resolveProvider(
-  user: any,
+  user: ProviderUser,
   functionField?: string,
   explicitModel?: string
-): Promise<{ apiKey: string; provider: AIProvider; ollamaBaseUrl?: string; model?: string }> {
-  // Resolve model first; infer provider from model ID if set
-  const model = explicitModel || (functionField && user[functionField]) || user.defaultModel || undefined
-  const inferredProvider = model ? inferProviderFromModel(model) : null
-  const preferred = inferredProvider || user.preferredProvider || 'deepseek'
-
-  const resolvers: Record<string, () => { apiKey: string; provider: AIProvider; ollamaBaseUrl?: string } | null> = {
-    deepseek: () => {
-      const key = process.env.DEEPSEEK_API_KEY || user.deepseekApiKey
-      return key ? { apiKey: key, provider: 'deepseek' } : null
-    },
-    qwen: () => {
-      const key = process.env.QWEN_API_KEY || user.qwenApiKey
-      return key ? { apiKey: key, provider: 'qwen' } : null
-    },
-    gemini: () => {
-      const key = process.env.GEMINI_API_KEY || user.geminiApiKey
-      return key ? { apiKey: key, provider: 'gemini' } : null
-    },
-    ollama: () => {
-      return { apiKey: '', provider: 'ollama', ollamaBaseUrl: user.ollamaBaseUrl || 'http://localhost:11434' }
-    },
+): Promise<{ apiKey: string; provider: AIProvider; ollamaBaseUrl?: string; model?: string; baseUrl?: string }> {
+  const runtime = resolveProviderRuntime({ user, functionField, explicitModel })
+  return {
+    apiKey: runtime.apiKey,
+    provider: runtime.provider,
+    ollamaBaseUrl: runtime.ollamaBaseUrl,
+    model: runtime.model,
+    baseUrl: runtime.baseUrl,
   }
-
-  // Try preferred first, then fallback
-  const result = resolvers[preferred]?.()
-  if (result) {
-    return { ...result, model }
-  }
-
-  // Fallback: try each provider
-  for (const key of ['deepseek', 'qwen', 'gemini', 'ollama']) {
-    const r = resolvers[key]?.()
-    if (r) {
-      return { ...r, model }
-    }
-  }
-
-  throw new Error('No AI provider configured. Please add an API key in Settings.')
 }
 
 export async function generateSimulationAction(
   prompt: string,
   subject: string,
-  type: 'REACT' | 'GEOGEBRA_API',
+  type: 'REACT',
   images?: string[],
   modelOverride?: string
 ) {
@@ -75,28 +68,38 @@ export async function generateSimulationAction(
       return { success: false, error: 'User not found' }
     }
 
-    // If images provided, force vision model (qwen3-vl-plus)
-    let resolved: { apiKey: string; provider: AIProvider; ollamaBaseUrl?: string; model?: string }
+    let resolved: { apiKey: string; provider: AIProvider; ollamaBaseUrl?: string; model?: string; baseUrl?: string }
     let model: string | undefined
     if (images && images.length > 0) {
-      const qwenKey = user.qwenApiKey
-      if (!qwenKey) {
+      const qwenRuntime = resolveProviderRuntime({ user, explicitModel: 'qwen3-vl-plus' })
+      if (!qwenRuntime.apiKey && qwenRuntime.provider !== 'ollama') {
         return { success: false, error: 'Image upload requires a Qwen API key. Please configure it in Settings.' }
       }
-      resolved = { apiKey: qwenKey, provider: 'qwen' }
-      model = 'qwen3-vl-plus'
+      resolved = {
+        apiKey: qwenRuntime.apiKey,
+        provider: qwenRuntime.provider,
+        ollamaBaseUrl: qwenRuntime.ollamaBaseUrl,
+        model: qwenRuntime.model,
+        baseUrl: qwenRuntime.baseUrl,
+      }
+      model = qwenRuntime.model || 'qwen3-vl-plus'
     } else {
       resolved = await resolveProvider(user, 'simulationModel', modelOverride)
       model = resolved.model
     }
 
-    // Generate simulation
-    const result = await generateSimulation(prompt, type, resolved.apiKey, {
+    const normalizedSubject = subject.trim()
+    const subjectAwarePrompt = normalizedSubject
+      ? `Subject: ${normalizedSubject}\n\nTask:\n${prompt}`
+      : prompt
+
+    const result = await generateSimulation(subjectAwarePrompt, type, resolved.apiKey, {
       provider: resolved.provider,
       ollamaBaseUrl: resolved.ollamaBaseUrl,
+      baseUrl: resolved.baseUrl,
       model,
       images,
-      temperature: 0.25,
+      temperature: 0.2,
     })
 
     if (!result.success || !result.code) {
@@ -109,9 +112,9 @@ export async function generateSimulationAction(
       variables: null,
       type,
     }
-  } catch (error: any) {
-    console.error('Generate simulation action error:', error)
-    return { success: false, error: error.message || 'Failed to generate simulation' }
+  } catch (error: unknown) {
+    logger.error({ error }, 'Generate simulation action error')
+    return { success: false, error: getErrorMessage(error, 'Failed to generate simulation') }
   }
 }
 
@@ -120,7 +123,7 @@ const CHECKPOINT_HISTORY_LIMIT = 80
 
 export async function persistCheckpointAction(
   simulationId: string,
-  checkpoint: { code: string; type: 'REACT' | 'GEOGEBRA_API'; reason: string; timestamp: number }
+  checkpoint: { code: string; type: 'REACT'; reason: string; timestamp: number }
 ): Promise<{ success: boolean; entry?: Record<string, unknown>; error?: string }> {
   try {
     const session = await auth()
@@ -163,27 +166,26 @@ export async function persistCheckpointAction(
       code: checkpoint.code,
       type: checkpoint.type,
       timestamp: checkpoint.timestamp,
-      prompt: `[checkpoint] ${checkpoint.reason}`,
     }
 
     const nextHistory = [...historyArray, entry].slice(-CHECKPOINT_HISTORY_LIMIT)
 
     await prisma.simulation.update({
       where: { id: simulationId },
-      data: { versionHistory: nextHistory as any },
+        data: { versionHistory: nextHistory as Prisma.InputJsonValue },
     })
 
     return { success: true, entry }
-  } catch (error: any) {
-    console.error('Persist checkpoint action error:', error)
-    return { success: false, error: error?.message || 'Failed to persist checkpoint' }
+  } catch (error: unknown) {
+    logger.error({ error, simulationId }, 'Persist checkpoint action error')
+    return { success: false, error: getErrorMessage(error, 'Failed to persist checkpoint') }
   }
 }
 
 export async function refineSimulationAction(
   currentCode: string,
   instruction: string,
-  type: 'REACT' | 'GEOGEBRA_API',
+  type: 'REACT',
   images?: string[],
   history?: Array<{ role: 'user' | 'assistant'; content: string }>,
   historySummary?: string,
@@ -198,19 +200,28 @@ export async function refineSimulationAction(
     const user = await prisma.user.findUnique({
       where: { email: session.user.email }
     })
+    if (!user) {
+      return { success: false, error: 'User not found' }
+    }
 
     // If images provided, force vision model
-    let resolved: { apiKey: string; provider: AIProvider; ollamaBaseUrl?: string; model?: string }
+    let resolved: { apiKey: string; provider: AIProvider; ollamaBaseUrl?: string; model?: string; baseUrl?: string }
     let model: string | undefined
     if (images && images.length > 0) {
-      const qwenKey = user!.qwenApiKey
-      if (!qwenKey) {
+      const qwenRuntime = resolveProviderRuntime({ user, explicitModel: 'qwen3-vl-plus' })
+      if (!qwenRuntime.apiKey && qwenRuntime.provider !== 'ollama') {
         return { success: false, error: 'Image upload requires a Qwen API key. Please configure it in Settings.' }
       }
-      resolved = { apiKey: qwenKey, provider: 'qwen' }
-      model = 'qwen3-vl-plus'
+      resolved = {
+        apiKey: qwenRuntime.apiKey,
+        provider: qwenRuntime.provider,
+        ollamaBaseUrl: qwenRuntime.ollamaBaseUrl,
+        model: qwenRuntime.model,
+        baseUrl: qwenRuntime.baseUrl,
+      }
+      model = qwenRuntime.model || 'qwen3-vl-plus'
     } else {
-      resolved = await resolveProvider(user!, 'simulationModel', modelOverride)
+      resolved = await resolveProvider(user, 'simulationModel', modelOverride)
       model = resolved.model
     }
 
@@ -225,6 +236,7 @@ export async function refineSimulationAction(
           provider: resolved.provider,
           model,
           ollamaBaseUrl: resolved.ollamaBaseUrl,
+          baseUrl: resolved.baseUrl,
         })
         activeSummary = activeSummary ? `${activeSummary} ${newSummary}` : newSummary
         activeHistory = windowSlice
@@ -236,6 +248,7 @@ export async function refineSimulationAction(
     const result = await refineSimulation(currentCode, instruction, type, resolved.apiKey, {
       provider: resolved.provider,
       ollamaBaseUrl: resolved.ollamaBaseUrl,
+      baseUrl: resolved.baseUrl,
       model,
       images,
       temperature: 0.2,
@@ -253,16 +266,16 @@ export async function refineSimulationAction(
       variables: null,
       historySummary: activeSummary,
     }
-  } catch (error: any) {
-    console.error('Refine simulation action error:', error)
-    return { success: false, error: error.message || 'Failed to refine simulation' }
+  } catch (error: unknown) {
+    logger.error({ error }, 'Refine simulation action error')
+    return { success: false, error: getErrorMessage(error, 'Failed to refine simulation') }
   }
 }
 
 export async function healSimulationAction(
   code: string,
   error: string,
-  type: 'REACT' | 'GEOGEBRA_API',
+  type: 'REACT',
   modelOverride?: string
 ) {
   try {
@@ -274,20 +287,24 @@ export async function healSimulationAction(
     const user = await prisma.user.findUnique({
       where: { email: session.user.email }
     })
+    if (!user) {
+      return { success: false, error: 'User not found' }
+    }
 
-    const { apiKey, provider, ollamaBaseUrl, model } = await resolveProvider(user!, 'simulationModel', modelOverride)
+    const runtime = await resolveProvider(user, 'simulationModel', modelOverride)
 
-    const result = await healSimulation(code, error, type, apiKey, {
-      provider,
-      ollamaBaseUrl,
-      model,
+    const result = await healSimulation(code, error, type, runtime.apiKey, {
+      provider: runtime.provider,
+      ollamaBaseUrl: runtime.ollamaBaseUrl,
+      baseUrl: runtime.baseUrl,
+      model: runtime.model,
       temperature: 0.15,
     })
 
     return result
-  } catch (error: any) {
-    console.error('Heal simulation action error:', error)
-    return { success: false, error: error.message || 'Failed to heal simulation' }
+  } catch (error: unknown) {
+    logger.error({ error }, 'Heal simulation action error')
+    return { success: false, error: getErrorMessage(error, 'Failed to heal simulation') }
   }
 }
 
@@ -295,17 +312,13 @@ export async function saveSimulationAction(data: {
   title: string
   description?: string
   subject: string
-  type: 'REACT' | 'GEOGEBRA_FILE' | 'GEOGEBRA_API'
+  type: 'REACT'
   reactCode?: string
-  geogebraFile?: string
-  geogebraMaterialId?: string
-  geogebraCommands?: any
-  geogebraSettings?: any
-  variables?: any
+  variables?: unknown
   isPublic?: boolean
   simulationId?: string // For updates
-  versionHistory?: any
-  chatHistory?: any
+  versionHistory?: unknown
+  chatHistory?: unknown
 }) {
   try {
     const session = await auth()
@@ -327,26 +340,36 @@ export async function saveSimulationAction(data: {
       subject: data.subject,
       type: data.type,
       reactCode: data.reactCode || null,
-      geogebraFile: data.geogebraFile || null,
-      geogebraMaterialId: data.geogebraMaterialId || null,
-      geogebraCommands: data.geogebraCommands || null,
-      geogebraSettings: data.geogebraSettings || null,
-      variables: data.variables || null,
+      geogebraFile: null,
+      geogebraMaterialId: null,
+      geogebraCommands: toOptionalJson(null),
+      geogebraSettings: toOptionalJson(null),
+      variables: toOptionalJson(data.variables),
       isPublic: data.isPublic || false,
-      versionHistory: data.versionHistory || null,
-      chatHistory: data.chatHistory || null,
+      versionHistory: toOptionalJson(data.versionHistory),
+      chatHistory: toOptionalJson(data.chatHistory),
       userId: user.id
     }
 
     let simulation
     if (data.simulationId) {
-      // Update existing
+      const ownedSimulation = await prisma.simulation.findFirst({
+        where: {
+          id: data.simulationId,
+          userId: user.id,
+        },
+        select: { id: true },
+      })
+
+      if (!ownedSimulation) {
+        return { success: false, error: 'Simulation not found or unauthorized' }
+      }
+
       simulation = await prisma.simulation.update({
         where: { id: data.simulationId },
         data: simulationData
       })
     } else {
-      // Create new
       simulation = await prisma.simulation.create({
         data: simulationData
       })
@@ -359,9 +382,9 @@ export async function saveSimulationAction(data: {
       success: true,
       simulation
     }
-  } catch (error: any) {
-    console.error('Save simulation action error:', error)
-    return { success: false, error: error.message || 'Failed to save simulation' }
+  } catch (error: unknown) {
+    logger.error({ error }, 'Save simulation action error')
+    return { success: false, error: getErrorMessage(error, 'Failed to save simulation') }
   }
 }
 
@@ -376,9 +399,61 @@ export async function generateDescriptionAction(
     const user = await prisma.user.findUnique({ where: { email: session.user.email } })
     if (!user) return { success: false, error: 'User not found' }
 
-    const { apiKey, provider, ollamaBaseUrl, model } = await resolveProvider(user, 'simulationModel')
-    return await generateDescription(code, subject, apiKey, { provider, ollamaBaseUrl, model })
-  } catch (error: any) {
-    return { success: false, error: error.message }
+    const runtime = await resolveProvider(user, 'simulationModel')
+    return await generateDescription(code, subject, runtime.apiKey, {
+      provider: runtime.provider,
+      ollamaBaseUrl: runtime.ollamaBaseUrl,
+      baseUrl: runtime.baseUrl,
+      model: runtime.model,
+    })
+  } catch (error: unknown) {
+    logger.error({ error }, 'Generate description action error')
+    return { success: false, error: getErrorMessage(error, 'Failed to generate description') }
+  }
+}
+
+function looksLikeChinese(input: string): boolean {
+  return /[\u3400-\u9FFF]/.test(input)
+}
+
+export async function rewritePromptAction(
+  prompt: string,
+  subject: string
+): Promise<{ success: boolean; rewrittenPrompt?: string; error?: string }> {
+  try {
+    const normalized = prompt.trim()
+    if (!normalized) return { success: false, error: 'Prompt is empty' }
+
+    const session = await auth()
+    if (!session?.user?.email) return { success: false, error: 'Unauthorized' }
+
+    const user = await prisma.user.findUnique({ where: { email: session.user.email } })
+    if (!user) return { success: false, error: 'User not found' }
+
+    const runtime = await resolveProvider(user, 'simulationModel')
+    const chinese = looksLikeChinese(normalized)
+
+    const systemPrompt = chinese
+      ? '你是一个教学仿真提示词优化助手。请把用户输入改写成更清晰、可执行、分步骤的仿真生成提示词。保持中文输出，不要改变原始教学目标；补充必要约束（交互控件、初始状态、成功标准、避免无关复杂度）。只输出改写后的提示词正文。'
+      : 'You are a simulation prompt optimization assistant. Rewrite the user input into a clearer, execution-ready, step-by-step prompt for educational simulation generation. Keep output in English, preserve the original teaching objective, and add practical constraints (controls, initial state, success criteria, avoid unnecessary complexity). Output only the rewritten prompt body.'
+
+    const rewritten = await generateContent('', runtime.apiKey, runtime.provider, {
+      model: runtime.model,
+      ollamaBaseUrl: runtime.ollamaBaseUrl,
+      baseUrl: runtime.baseUrl,
+      temperature: 0.25,
+      timeoutMs: 30000,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: `${chinese ? '学科' : 'Subject'}: ${subject}\n\n${chinese ? '原始提示词' : 'Original prompt'}:\n${normalized}` },
+      ],
+    })
+
+    const cleaned = rewritten.trim()
+    if (!cleaned) return { success: false, error: 'Rewrite returned empty result' }
+    return { success: true, rewrittenPrompt: cleaned }
+  } catch (error: unknown) {
+    logger.error({ error }, 'Rewrite prompt action error')
+    return { success: false, error: getErrorMessage(error, 'Failed to rewrite prompt') }
   }
 }

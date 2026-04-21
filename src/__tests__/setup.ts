@@ -1,2 +1,1 @@
-// Vitest global setup
-import '@testing-library/jest-dom'
+// Vitest global setup (kept intentionally minimal for non-DOM utility tests)

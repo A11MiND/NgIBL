@@ -1,7 +1,3 @@
-// @ts-ignore
-import { GoogleGenAI } from "@google/genai";
-import { GoogleGenerativeAI } from "@google/generative-ai";
-
 export type AIProvider = 'gemini' | 'deepseek' | 'qwen' | 'ollama';
 
 /**
@@ -29,6 +25,26 @@ const DEFAULT_MODELS: Record<string, string> = {
   ollama: 'llama3',
   gemini: 'gemini-1.5-flash',
 };
+
+const DEFAULT_PROVIDER_TIMEOUT_MS = 120000;
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    promise
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+  });
+}
 
 /**
  * Convert base64 data-url images into OpenAI vision content parts.
@@ -77,7 +93,9 @@ async function callOpenAICompatible(
   messages: any[],
   temperature: number,
   providerLabel: string,
-  images?: string[]
+  images?: string[],
+  timeoutMs: number = DEFAULT_PROVIDER_TIMEOUT_MS,
+  maxTokens?: number
 ): Promise<string> {
   const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -90,11 +108,30 @@ async function callOpenAICompatible(
     ? injectImagesIntoMessages(messages, images)
     : messages;
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ model, messages: finalMessages, temperature }),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        model,
+        messages: finalMessages,
+        temperature,
+        ...(typeof maxTokens === 'number' ? { max_tokens: maxTokens } : {}),
+      }),
+      signal: controller.signal,
+    });
+  } catch (error: any) {
+    if (error?.name === 'AbortError') {
+      throw new Error(`${providerLabel} API timed out after ${timeoutMs}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!response.ok) {
     const error = await response.text();
@@ -114,11 +151,15 @@ export async function generateContent(
     model?: string;
     messages?: any[];
     ollamaBaseUrl?: string;
+    baseUrl?: string;
     images?: string[];
+    timeoutMs?: number;
+    maxTokens?: number;
   } = {}
 ) {
   const temperature = options.temperature ?? 0.7;
   const messages = options.messages || [{ role: 'user', content: prompt }];
+  const timeoutMs = options.timeoutMs ?? DEFAULT_PROVIDER_TIMEOUT_MS;
 
   // --- OpenAI-compatible providers ---
   if (provider === 'deepseek' || provider === 'qwen' || provider === 'ollama') {
@@ -128,7 +169,7 @@ export async function generateContent(
     if (provider === 'ollama') {
       baseUrl = (options.ollamaBaseUrl || 'http://localhost:11434') + '/v1';
     } else {
-      baseUrl = PROVIDER_URLS[provider];
+      baseUrl = options.baseUrl || PROVIDER_URLS[provider];
     }
 
     return callOpenAICompatible(
@@ -138,7 +179,9 @@ export async function generateContent(
       messages,
       temperature,
       provider.charAt(0).toUpperCase() + provider.slice(1),
-      options.images
+      options.images,
+      timeoutMs,
+      options.maxTokens
     );
   }
 
@@ -150,8 +193,8 @@ export async function generateContent(
     
     if (isGemini3OrNewer) {
       try {
+        const { GoogleGenAI } = await import('@google/genai')
         // Official Google implementation for Gemini 3
-        // @ts-ignore
         const ai = new GoogleGenAI({ apiKey });
         
         // Handle messages format
@@ -190,24 +233,33 @@ export async function generateContent(
             requestBody.generation_config = { temperature };
           }
           
-          const response = await ai.models.generateContent(requestBody);
+          const response = await withTimeout(
+            ai.models.generateContent(requestBody),
+            timeoutMs,
+            'Gemini API request'
+          );
           return response.text ?? '';
         } else {
           // Simple text prompt
-          const response = await ai.models.generateContent({
-            model: modelName,
-            contents: prompt,
-            config: temperature !== undefined ? { temperature } : undefined
-          });
+          const response = await withTimeout(
+            ai.models.generateContent({
+              model: modelName,
+              contents: prompt,
+              config: temperature !== undefined ? { temperature } : undefined
+            }),
+            timeoutMs,
+            'Gemini API request'
+          );
           return response.text ?? '';
         }
       } catch (error: any) {
         console.error(`Gemini 3 SDK error: ${error.message}. Falling back to REST API...`);
         // Fallback to REST API
-        return generateContentViaRestAPI(modelName, prompt, apiKey, options, temperature);
+        return generateContentViaRestAPI(modelName, prompt, apiKey, options, temperature, timeoutMs);
       }
     } else {
       // Fallback to @google/generative-ai for older models like gemini-1.5
+      const { GoogleGenerativeAI } = await import('@google/generative-ai')
       const genAI = new GoogleGenerativeAI(apiKey);
       const model = genAI.getGenerativeModel({ 
         model: modelName,
@@ -242,11 +294,19 @@ export async function generateContent(
         const lastMessage = processedMessages[processedMessages.length - 1];
         
         const chat = model.startChat({ history });
-        const result = await chat.sendMessage(lastMessage.content);
+        const result = await withTimeout(
+          chat.sendMessage(lastMessage.content),
+          timeoutMs,
+          'Gemini API request'
+        );
         return result.response.text();
       } else {
         // Simple generation
-        const result = await model.generateContent(prompt);
+        const result = await withTimeout(
+          model.generateContent(prompt),
+          timeoutMs,
+          'Gemini API request'
+        );
         return result.response.text();
       }
     }
@@ -263,7 +323,8 @@ async function generateContentViaRestAPI(
   prompt: string,
   apiKey: string,
   options: { temperature?: number, messages?: any[] },
-  temperature: number
+  temperature: number,
+  timeoutMs: number = DEFAULT_PROVIDER_TIMEOUT_MS
 ): Promise<string> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`;
   
@@ -305,14 +366,28 @@ async function generateContentViaRestAPI(
     payload.generationConfig = { temperature };
   }
   
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-goog-api-key': apiKey,
-    },
-    body: JSON.stringify(payload)
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': apiKey,
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+  } catch (error: any) {
+    if (error?.name === 'AbortError') {
+      throw new Error(`Gemini 3 REST API timed out after ${timeoutMs}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
   
   if (!response.ok) {
     const error = await response.text();

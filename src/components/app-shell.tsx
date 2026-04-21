@@ -24,9 +24,9 @@ export function AppNav({ navItems, logoutLabel, onLogout }: {
 
   function isActive(href: string) {
     if (href === "/dashboard") {
-      return pathname === "/dashboard" || pathname.startsWith("/dashboard/")
+      return pathname === "/dashboard" || (pathname.startsWith("/dashboard/") && !pathname.startsWith("/dashboard/settings"))
     }
-    return pathname.startsWith(href)
+    return pathname === href || pathname.startsWith(`${href}/`)
   }
 
   return (

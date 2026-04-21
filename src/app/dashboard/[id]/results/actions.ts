@@ -3,15 +3,17 @@
 import { auth } from '@/auth'
 import { prisma } from '@/lib/prisma'
 import { analyzeStudentAnswers, analyzeIndividualStudent } from '@/lib/ai-simulation'
-import { AIProvider, inferProviderFromModel } from '@/lib/ai'
-import { cached, cacheDelete, CacheKeys } from '@/lib/cache'
+import { AIProvider } from '@/lib/ai'
+import { CacheKeys } from '@/lib/cache'
 import { rateLimit } from '@/lib/rate-limit'
 import { logger, logAI } from '@/lib/logger'
+import { resolveProviderRuntime } from '@/lib/provider-runtime'
 
 type AnalysisRuntime = {
   apiKey: string
   provider: AIProvider
   ollamaBaseUrl?: string
+  baseUrl?: string
   model?: string
 }
 
@@ -50,39 +52,23 @@ async function resolveAnalysisRuntime(user: {
   preferredProvider: string | null
   defaultModel: string | null
   analysisModel: string | null
+  modelProviders?: unknown
 }): Promise<AnalysisRuntime | { error: string }> {
-  const model = user.analysisModel || user.defaultModel || undefined
-  const inferredProvider = model ? inferProviderFromModel(model) : null
-  const preferred = (inferredProvider || user.preferredProvider || 'deepseek') as AIProvider
-  let apiKey = ''
-  let provider: AIProvider = preferred
-  let ollamaBaseUrl: string | undefined
-
-  switch (preferred) {
-    case 'deepseek':
-      apiKey = process.env.DEEPSEEK_API_KEY || user.deepseekApiKey || ''
-      break
-    case 'qwen':
-      apiKey = process.env.QWEN_API_KEY || user.qwenApiKey || ''
-      break
-    case 'gemini':
-      apiKey = process.env.GEMINI_API_KEY || user.geminiApiKey || ''
-      break
-    case 'ollama':
-      ollamaBaseUrl = user.ollamaBaseUrl || 'http://localhost:11434'
-      break
-  }
-
-  if (!apiKey && provider !== 'ollama') {
-    if (process.env.DEEPSEEK_API_KEY || user.deepseekApiKey) {
-      apiKey = process.env.DEEPSEEK_API_KEY || user.deepseekApiKey || ''
-      provider = 'deepseek'
-    } else {
-      return { error: 'No AI provider configured. Please add an API key in Settings.' }
+  try {
+    const runtime = resolveProviderRuntime({
+      user,
+      functionField: 'analysisModel',
+    })
+    return {
+      apiKey: runtime.apiKey,
+      provider: runtime.provider,
+      ollamaBaseUrl: runtime.ollamaBaseUrl,
+      baseUrl: runtime.baseUrl,
+      model: runtime.model,
     }
+  } catch {
+    return { error: 'No AI provider configured. Please add an API key in Settings or install a model provider.' }
   }
-
-  return { apiKey, provider, ollamaBaseUrl, model }
 }
 
 export async function analyzeAnswersAction(experimentId: string): Promise<{
@@ -105,6 +91,7 @@ export async function analyzeAnswersAction(experimentId: string): Promise<{
       preferredProvider: true,
       defaultModel: true,
       analysisModel: true,
+      modelProviders: true,
     }
   })
   if (!user) return { success: false, error: 'User not found' }
@@ -144,7 +131,7 @@ export async function analyzeAnswersAction(experimentId: string): Promise<{
 
   const runtime = await resolveAnalysisRuntime(user)
   if ('error' in runtime) return { success: false, error: runtime.error }
-  const { apiKey, provider, ollamaBaseUrl, model } = runtime
+  const { apiKey, provider, ollamaBaseUrl, baseUrl, model } = runtime
 
   // Build question-answer structure
   const questionsAndAnswers = experiment.questions.map(q => ({
@@ -161,7 +148,7 @@ export async function analyzeAnswersAction(experimentId: string): Promise<{
     questionsAndAnswers,
     experiment.subject,
     apiKey,
-    { provider, ollamaBaseUrl, model }
+    { provider, ollamaBaseUrl, baseUrl, model }
   )
 
   logAI('class_analysis', {
@@ -214,6 +201,7 @@ export async function analyzeStudentAction(
       preferredProvider: true,
       defaultModel: true,
       analysisModel: true,
+      modelProviders: true,
     }
   })
   if (!user) return { success: false, error: 'User not found' }
@@ -252,7 +240,7 @@ export async function analyzeStudentAction(
 
   const runtime = await resolveAnalysisRuntime(user)
   if ('error' in runtime) return { success: false, error: runtime.error }
-  const { apiKey, provider, ollamaBaseUrl, model } = runtime
+  const { apiKey, provider, ollamaBaseUrl, baseUrl, model } = runtime
 
   // Build per-student data with class context
   const studentAnswers = experiment.questions.map(q => {
@@ -275,7 +263,7 @@ export async function analyzeStudentAction(
     studentAnswers,
     experiment.subject,
     apiKey,
-    { provider, ollamaBaseUrl, model }
+    { provider, ollamaBaseUrl, baseUrl, model }
   )
 
   logAI('student_analysis', {

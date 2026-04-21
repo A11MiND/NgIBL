@@ -37,10 +37,14 @@ export default async function SandboxEditPage({ params }: { params: Promise<{ id
         title: simulation.title,
         description: simulation.description,
         subject: simulation.subject,
-        type: simulation.type as 'REACT' | 'GEOGEBRA_API',
-        code: simulation.reactCode || (simulation.geogebraCommands ? JSON.stringify(simulation.geogebraCommands) : ''),
-        versionHistory: (simulation.versionHistory as any[]) || [],
-        chatHistory: (simulation.chatHistory as any[]) || null,
+        type: 'REACT',
+        code: simulation.reactCode || '',
+        versionHistory: Array.isArray(simulation.versionHistory)
+          ? simulation.versionHistory as Array<{ version: number; code: string; timestamp: number; prompt?: string; kind?: 'version' | 'checkpoint'; type?: 'REACT' }>
+          : [],
+        chatHistory: Array.isArray(simulation.chatHistory)
+          ? simulation.chatHistory as Array<{ role: 'user' | 'assistant' | 'system'; content: string; images?: string[] }>
+          : null,
       }}
     />
   )
