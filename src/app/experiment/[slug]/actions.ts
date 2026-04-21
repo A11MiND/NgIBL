@@ -90,7 +90,7 @@ export async function chatWithTutor(
     {
       provider: provider === 'ollama' ? 'ollama' : (user.geminiApiKey ? 'gemini' : undefined),
       apiKey: user.geminiApiKey || effectiveApiKey!,
-      ollamaBaseUrl: user.ollamaBaseUrl,
+      ollamaBaseUrl: user.ollamaBaseUrl || undefined,
     }
   )
 
@@ -102,7 +102,10 @@ export async function chatWithTutor(
 
   const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
     { role: 'system', content: fullSystemPrompt },
-    ...history.map(msg => ({ role: msg.role === 'user' ? 'user' : 'assistant', content: msg.content })),
+    ...history.map((msg): { role: 'user' | 'assistant'; content: string } => ({
+      role: msg.role === 'user' ? 'user' : 'assistant',
+      content: msg.content,
+    })),
     { role: 'user', content: message || "Please look at the image(s) I've attached and help me." }
   ]
 

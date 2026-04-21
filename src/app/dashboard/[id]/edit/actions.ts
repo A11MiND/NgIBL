@@ -120,11 +120,16 @@ Generate exactly ${count} questions. Return ONLY the JSON array, no other text.`
     }
 
     // Validate and clean
-    const cleaned = questions.map((q: Record<string, unknown>) => ({
-      type: ["SHORT", "LONG", "MCQ", "FILL_IN"].includes(q.type) ? q.type : "SHORT",
-      question: String(q.question || ""),
-      options: q.type === "MCQ" && Array.isArray(q.options) ? q.options.map(String) : null,
-    })).filter((q: { question: string }) => q.question.length > 0)
+    const validTypes = ["SHORT", "LONG", "MCQ", "FILL_IN"] as const
+    const cleaned = questions.map((q: Record<string, unknown>) => {
+      const rawType = typeof q.type === "string" ? q.type : ""
+      const type = validTypes.includes(rawType as (typeof validTypes)[number]) ? rawType : "SHORT"
+      return {
+        type,
+        question: String(q.question || ""),
+        options: type === "MCQ" && Array.isArray(q.options) ? q.options.map(String) : null,
+      }
+    }).filter((q: { question: string }) => q.question.length > 0)
 
     return { success: true, questions: cleaned }
   } catch (error: unknown) {

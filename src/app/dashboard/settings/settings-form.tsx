@@ -206,7 +206,7 @@ const ALL_MODELS: { value: string; label: string; provider: string; vision?: boo
   { value: "gemini-2.0-flash", label: "Gemini 2.0 Flash", provider: "gemini" },
 ]
 
-const PROVIDER_MODELS: Record<string, { value: string; label: string }[]> = {
+const PROVIDER_MODELS: Record<string, { value: string; label: string; provider: string }[]> = {
   deepseek: ALL_MODELS.filter(m => m.provider === "deepseek"),
   qwen: ALL_MODELS.filter(m => m.provider === "qwen"),
   gemini: ALL_MODELS.filter(m => m.provider === "gemini"),
