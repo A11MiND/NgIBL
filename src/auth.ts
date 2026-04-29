@@ -4,6 +4,8 @@ import Credentials from "next-auth/providers/credentials"
 import { z } from "zod"
 import { prisma } from "@/lib/prisma"
 import bcrypt from "bcryptjs"
+import { verifyOneForAllLaunchToken } from "@/lib/oneforall-launch-token"
+import { provisionOneForAllUser } from "@/lib/oneforall-jit"
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
@@ -14,6 +16,18 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   providers: [
     Credentials({
       async authorize(credentials) {
+        const ssoToken = typeof credentials?.ssoToken === "string" ? credentials.ssoToken : ""
+        if (ssoToken) {
+          try {
+            const claims = verifyOneForAllLaunchToken(ssoToken)
+            const { user } = await provisionOneForAllUser(claims)
+            return user
+          } catch (error) {
+            console.log("SSO launch failed:", error instanceof Error ? error.message : error)
+            return null
+          }
+        }
+
         const parsedCredentials = z
           .object({ email: z.string().email(), password: z.string().min(6) })
           .safeParse(credentials);
