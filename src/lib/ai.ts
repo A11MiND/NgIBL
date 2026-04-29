@@ -15,12 +15,12 @@ export function inferProviderFromModel(modelId: string): AIProvider | null {
 
 // Base URLs for OpenAI-compatible providers
 const PROVIDER_URLS: Record<string, string> = {
-  deepseek: 'https://api.deepseek.com/v1',
+  deepseek: 'https://api.deepseek.com/chat/completions',
   qwen: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
 };
 
 const DEFAULT_MODELS: Record<string, string> = {
-  deepseek: 'deepseek-chat',
+  deepseek: 'deepseek-v4-flash',
   qwen: 'qwen-turbo',
   ollama: 'llama3',
   gemini: 'gemini-1.5-flash',
@@ -97,7 +97,10 @@ async function callOpenAICompatible(
   timeoutMs: number = DEFAULT_PROVIDER_TIMEOUT_MS,
   maxTokens?: number
 ): Promise<string> {
-  const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
+  const normalizedBaseUrl = baseUrl.replace(/\/+$/, '')
+  const url = normalizedBaseUrl.endsWith('/chat/completions')
+    ? normalizedBaseUrl
+    : `${normalizedBaseUrl}/chat/completions`;
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (apiKey) {
     headers['Authorization'] = `Bearer ${apiKey}`;

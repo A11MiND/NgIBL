@@ -188,8 +188,10 @@ function ProviderBadge({ input, compact = false }: { input: string; compact?: bo
 
 const ALL_MODELS: { value: string; label: string; provider: string; vision?: boolean }[] = [
   // DeepSeek
-  { value: "deepseek-chat", label: "DeepSeek Chat (V3.2)", provider: "deepseek" },
-  { value: "deepseek-reasoner", label: "DeepSeek Reasoner (Thinking)", provider: "deepseek" },
+  { value: "deepseek-v4-flash", label: "DeepSeek V4 Flash", provider: "deepseek" },
+  { value: "deepseek-v4-pro", label: "DeepSeek V4 Pro", provider: "deepseek" },
+  { value: "deepseek-chat", label: "DeepSeek Chat (deprecated after 2026/07/24)", provider: "deepseek" },
+  { value: "deepseek-reasoner", label: "DeepSeek Reasoner (deprecated after 2026/07/24)", provider: "deepseek" },
   // Qwen
   { value: "qwen3.5-397b-a17b", label: "Qwen3.5 397B MoE (Flagship)", provider: "qwen" },
   { value: "qwen3-235b-a22b", label: "Qwen3 235B MoE", provider: "qwen" },
@@ -214,7 +216,7 @@ const PROVIDER_MODELS: Record<string, { value: string; label: string; provider: 
 }
 
 const DEFAULT_MODEL_FOR_PROVIDER: Record<string, string> = {
-  deepseek: "deepseek-chat",
+  deepseek: "deepseek-v4-flash",
   qwen: "qwen-plus",
   gemini: "gemini-1.5-flash",
   ollama: "",

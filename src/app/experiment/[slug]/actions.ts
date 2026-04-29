@@ -47,7 +47,7 @@ export async function chatWithTutor(
   }
 
   // Use per-function chatbotModel override > experiment aiModel > default
-  const baseModel = String(user.chatbotModel || experiment.aiModel || "deepseek-chat")
+  const baseModel = String(user.chatbotModel || experiment.aiModel || "deepseek-v4-flash")
 
   let provider: AIProvider
   let model: string

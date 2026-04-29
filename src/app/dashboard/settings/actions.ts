@@ -284,7 +284,7 @@ export async function testProviderAction(input: string | ProviderTestInput): Pro
   if (providerId === "deepseek") {
     provider = "deepseek"
     apiKey = apiKey || process.env.DEEPSEEK_API_KEY || user.deepseekApiKey || ""
-    model = model || "deepseek-chat"
+    model = model || "deepseek-v4-flash"
   } else if (providerId === "qwen" || providerId === "tongyi") {
     provider = "qwen"
     apiKey = apiKey || process.env.QWEN_API_KEY || user.qwenApiKey || ""

@@ -37,7 +37,15 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
   { id: 'cohere', name: 'Cohere', category: 'global', defaultModel: 'command-r-plus', defaultBaseUrl: 'https://api.cohere.com/v1', apiKeyPlaceholder: 'co-...' },
 
   // China local vendors
-  { id: 'deepseek', name: 'DeepSeek', category: 'china', defaultModel: 'deepseek-chat', defaultBaseUrl: 'https://api.deepseek.com/v1', apiKeyPlaceholder: 'sk-...' },
+  {
+    id: 'deepseek',
+    name: 'DeepSeek',
+    category: 'china',
+    defaultModel: 'deepseek-v4-flash',
+    defaultBaseUrl: 'https://api.deepseek.com/chat/completions',
+    apiKeyPlaceholder: 'apply for an API key',
+    notes: 'Anthropic-compatible base URL: https://api.deepseek.com/anthropic. Recommended models: deepseek-v4-flash, deepseek-v4-pro. Legacy models deepseek-chat and deepseek-reasoner are deprecated after 2026/07/24.',
+  },
   { id: 'zhipu', name: 'ZhipuAI (GLM)', category: 'china', defaultModel: 'glm-4', defaultBaseUrl: 'https://open.bigmodel.cn/api/paas/v4', apiKeyPlaceholder: 'zhipu-...' },
   { id: 'moonshot', name: 'Moonshot AI (Kimi)', category: 'china', defaultModel: 'moonshot-v1-8k', defaultBaseUrl: 'https://api.moonshot.cn/v1', apiKeyPlaceholder: 'sk-...' },
   { id: 'tongyi', name: 'Alibaba Tongyi (Qwen)', category: 'china', defaultModel: 'qwen-plus', defaultBaseUrl: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1', apiKeyPlaceholder: 'sk-...' },

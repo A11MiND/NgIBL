@@ -188,8 +188,10 @@ export default function ExperimentEditor({ experiment, mySimulations, communityS
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="deepseek-chat">DeepSeek Chat (V3.2)</SelectItem>
-                          <SelectItem value="deepseek-reasoner">DeepSeek Reasoner (Thinking)</SelectItem>
+                          <SelectItem value="deepseek-v4-flash">DeepSeek V4 Flash</SelectItem>
+                          <SelectItem value="deepseek-v4-pro">DeepSeek V4 Pro</SelectItem>
+                          <SelectItem value="deepseek-chat">DeepSeek Chat (deprecated after 2026/07/24)</SelectItem>
+                          <SelectItem value="deepseek-reasoner">DeepSeek Reasoner (deprecated after 2026/07/24)</SelectItem>
                           <SelectItem value="qwen-max">Qwen3 Max</SelectItem>
                           <SelectItem value="qwen-plus">Qwen Plus (1M context)</SelectItem>
                           <SelectItem value="qwen-turbo">Qwen Flash (1M context)</SelectItem>
