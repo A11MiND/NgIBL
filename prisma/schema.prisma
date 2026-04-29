@@ -20,16 +20,170 @@ enum Role {
   ADMIN
 }
 
+enum MembershipRole {
+  OWNER
+  ADMIN
+  TEACHER
+  STUDENT
+}
+
+enum MembershipStatus {
+  INVITED
+  ACTIVE
+  SUSPENDED
+}
+
+enum SubscriptionStatus {
+  TRIAL
+  ACTIVE
+  PAST_DUE
+  CANCELED
+}
+
+enum Platform {
+  IBL
+  ENGLISH_LEARNING
+  LEARNING_ASSISTANT
+}
+
+model Organization {
+  id          String   @id @default(uuid())
+  name        String
+  slug        String   @unique
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  memberships UserOrganizationMembership[]
+  users       User[]
+  subscriptions OrgSubscription[]
+  entitlements Entitlement[]
+  classrooms  Classroom[]
+  experiments Experiment[]
+  simulations Simulation[]
+  auditLogs   AuditLog[]
+
+  @@index([slug])
+}
+
+model UserOrganizationMembership {
+  id             String           @id @default(uuid())
+  userId         String
+  organizationId String
+  role           MembershipRole   @default(STUDENT)
+  status         MembershipStatus @default(ACTIVE)
+  invitedBy      String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId])
+  @@index([organizationId, role])
+}
+
+model OrgSubscription {
+  id             String             @id @default(uuid())
+  organizationId String
+  planCode       String
+  status         SubscriptionStatus @default(TRIAL)
+  startedAt      DateTime           @default(now())
+  endsAt         DateTime?
+  metadata       Json?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, status])
+}
+
+model Entitlement {
+  id             String   @id @default(uuid())
+  organizationId String
+  key            String
+  enabled        Boolean  @default(true)
+  quota          Int?
+  metadata       Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, key])
+  @@index([organizationId])
+}
+
+model Classroom {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String
+  code           String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  enrollments  ClassroomEnrollment[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+model ClassroomEnrollment {
+  id            String   @id @default(uuid())
+  classroomId   String
+  userId        String
+  studentNumber String?
+  createdAt     DateTime @default(now())
+
+  classroom Classroom @relation(fields: [classroomId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([classroomId, userId])
+  @@index([userId])
+}
+
+model GlobalUser {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  mappings PlatformUserMapping[]
+}
+
+model PlatformUserMapping {
+  id           String   @id @default(uuid())
+  globalUserId String
+  platform     Platform
+  localUserId  String
+  userId       String?
+  createdAt    DateTime @default(now())
+
+  globalUser GlobalUser @relation(fields: [globalUserId], references: [id], onDelete: Cascade)
+  user       User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@unique([platform, localUserId])
+  @@index([userId])
+}
+
 model User {
   id        String   @id @default(uuid())
+  globalUserId String?
+  organizationId String?
   email     String   @unique
   password  String
   name      String?
   role      Role     @default(TEACHER)
   createdAt DateTime @default(now())
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  memberships  UserOrganizationMembership[]
+  classroomEnrollments ClassroomEnrollment[]
+  platformMappings PlatformUserMapping[]
   
   experiments Experiment[]
   simulations Simulation[]
+  submissions StudentSubmission[]
   geminiApiKey  String?
   deepseekApiKey String?
   qwenApiKey     String?
@@ -47,6 +201,7 @@ model User {
   // Audit trail
   auditLogs  AuditLog[]
 
+  @@index([organizationId])
   @@index([email])
   @@index([role])
   @@index([createdAt])
@@ -68,7 +223,9 @@ model Experiment {
   allowImageUpload Boolean @default(false)
 
   userId         String?
+  organizationId String?
   user           User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
 
   simulationId   String?
   simulation     Simulation? @relation(fields: [simulationId], references: [id])
@@ -81,6 +238,7 @@ model Experiment {
   studentProgressSnapshots StudentProgressSnapshot[]
 
   @@index([userId, createdAt])
+  @@index([organizationId, createdAt])
   @@index([subject])
   @@index([isPublished])
   @@index([slug])
@@ -103,7 +261,9 @@ model WorksheetQuestion {
 model StudentSubmission {
   id           String   @id @default(uuid())
   experimentId String
+  userId       String?
   experiment   Experiment @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+  user         User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
   studentName  String
   studentId    String
   class        String
@@ -112,6 +272,7 @@ model StudentSubmission {
   answers      Answer[]
 
   @@index([experimentId, submittedAt])
+  @@index([userId])
   @@index([studentId])
 }
 
@@ -162,11 +323,14 @@ model Simulation {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   userId      String
+  organizationId String?
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
   
   experiments Experiment[]
 
   @@index([userId, createdAt])
+  @@index([organizationId, createdAt])
   @@index([isPublic])
   @@index([subject])
 }
@@ -191,7 +355,9 @@ model Embedding {
 model AuditLog {
   id        String   @id @default(uuid())
   userId    String
+  organizationId String?
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
   action    String   // CREATE, UPDATE, DELETE, LOGIN, etc.
   entity    String   // Experiment, Simulation, etc.
   entityId  String?
@@ -199,6 +365,7 @@ model AuditLog {
   createdAt DateTime @default(now())
 
   @@index([userId, createdAt])
+  @@index([organizationId, createdAt])
   @@index([entity, action])
 }
 

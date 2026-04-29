@@ -37,6 +37,47 @@ export async function requireAuth() {
 }
 
 /**
+ * Resolve current org context from user default organization or explicit input.
+ */
+export async function requireOrgMember(organizationId?: string) {
+  const user = await requireAuth()
+  const targetOrgId = organizationId || user.organizationId || undefined
+
+  if (!targetOrgId) {
+    throw new ForbiddenError('No organization context available')
+  }
+
+  const membership = await prisma.userOrganizationMembership.findFirst({
+    where: {
+      userId: user.id,
+      organizationId: targetOrgId,
+      status: 'ACTIVE',
+    },
+    select: { role: true },
+  })
+
+  if (!membership && user.role !== 'ADMIN') {
+    throw new ForbiddenError('User is not a member of this organization')
+  }
+
+  return { user, organizationId: targetOrgId, membershipRole: membership?.role }
+}
+
+/**
+ * Require org admin/owner permissions.
+ */
+export async function requireOrgAdmin(organizationId?: string) {
+  const { user, organizationId: orgId, membershipRole } = await requireOrgMember(organizationId)
+  const isOrgAdmin = membershipRole === 'ADMIN' || membershipRole === 'OWNER'
+
+  if (!isOrgAdmin && user.role !== 'ADMIN') {
+    throw new ForbiddenError('Requires organization admin permission')
+  }
+
+  return { user, organizationId: orgId, membershipRole }
+}
+
+/**
  * Require an authenticated user with a specific role.
  * Throws ForbiddenError if the user doesn't have the required role.
  */
@@ -67,7 +108,7 @@ export async function requireExperimentOwner(experimentId: string) {
 
   const experiment = await prisma.experiment.findUnique({
     where: { id: experimentId },
-    select: { userId: true },
+    select: { userId: true, organizationId: true },
   })
 
   if (!experiment) {
@@ -77,6 +118,19 @@ export async function requireExperimentOwner(experimentId: string) {
 
   // Admins can access any experiment
   if (experiment.userId !== user.id && user.role !== 'ADMIN') {
+    // Transitional compatibility: allow org-level admins for org-scoped resources.
+    if (experiment.organizationId) {
+      const membership = await prisma.userOrganizationMembership.findFirst({
+        where: {
+          userId: user.id,
+          organizationId: experiment.organizationId,
+          status: 'ACTIVE',
+          role: { in: ['ADMIN', 'OWNER'] },
+        },
+        select: { id: true },
+      })
+      if (membership) return user
+    }
     throw new ForbiddenError('You do not own this experiment')
   }
 
@@ -91,7 +145,7 @@ export async function requireSimulationOwner(simulationId: string) {
 
   const simulation = await prisma.simulation.findUnique({
     where: { id: simulationId },
-    select: { userId: true },
+    select: { userId: true, organizationId: true },
   })
 
   if (!simulation) {
@@ -100,6 +154,18 @@ export async function requireSimulationOwner(simulationId: string) {
   }
 
   if (simulation.userId !== user.id && user.role !== 'ADMIN') {
+    if (simulation.organizationId) {
+      const membership = await prisma.userOrganizationMembership.findFirst({
+        where: {
+          userId: user.id,
+          organizationId: simulation.organizationId,
+          status: 'ACTIVE',
+          role: { in: ['ADMIN', 'OWNER'] },
+        },
+        select: { id: true },
+      })
+      if (membership) return user
+    }
     throw new ForbiddenError('You do not own this simulation')
   }
 
@@ -113,6 +179,7 @@ export async function requireSimulationOwner(simulationId: string) {
  */
 export function auditLog(params: {
   userId: string
+  organizationId?: string
   action: string
   entity: string
   entityId?: string
@@ -122,6 +189,7 @@ export function auditLog(params: {
   prisma.auditLog.create({
     data: {
       userId: params.userId,
+      organizationId: params.organizationId,
       action: params.action,
       entity: params.entity,
       entityId: params.entityId,
