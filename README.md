@@ -1,224 +1,112 @@
-# IBL Platform — Enterprise Inquiry-Based Learning
+# NgIBL — Inquiry-Based Learning Platform
 
-A production-grade **Inquiry-Based Learning** platform built with Next.js 16, featuring AI-powered tutoring, interactive simulations, RAG-enhanced context retrieval, and real-time analytics for STEM education.
+![Next.js](https://img.shields.io/badge/Next.js-16-black)
+![TypeScript](https://img.shields.io/badge/TypeScript-5-blue)
+![Prisma](https://img.shields.io/badge/Prisma-6-2D3748)
 
-**Live** → [ibl-five.vercel.app](https://ibl-five.vercel.app)
+A Next.js platform for inquiry-based STEM learning: teachers build experiments with AI-generated worksheets and interactive simulations, students work through them with an AI tutor, and a multi-agent pipeline generates and self-corrects the simulation code.
 
----
+**Live**: [ibl-five.vercel.app](https://ibl-five.vercel.app)
 
-## Architecture Overview
+## Overview
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                    Next.js 16 App Router                │
-│  ┌──────────┐  ┌──────────┐  ┌───────────┐  ┌───────┐  │
-│  │ Dashboard │  │Experiment│  │  Sandbox  │  │  API  │  │
-│  │  (CRUD)  │  │ (Student)│  │(Sim Gen)  │  │Routes │  │
-│  └────┬─────┘  └────┬─────┘  └─────┬─────┘  └───┬───┘  │
-│       │              │              │             │      │
-│  ┌────▼──────────────▼──────────────▼─────────────▼───┐  │
-│  │              Server Actions / API Layer            │  │
-│  │  Error Handling │ Rate Limiting │ Auth Guards      │  │
-│  └────┬──────────────┬──────────────┬─────────────────┘  │
-│       │              │              │                    │
-│  ┌────▼────┐  ┌──────▼──────┐  ┌───▼────┐  ┌────────┐  │
-│  │ Prisma  │  │  AI Layer   │  │ Cache  │  │  RAG   │  │
-│  │   ORM   │  │Gemini/Deep- │  │Vercel  │  │pgvector│  │
-│  │         │  │Seek/Ollama  │  │  KV    │  │        │  │
-│  └────┬────┘  └─────────────┘  └────────┘  └────────┘  │
-└───────┼─────────────────────────────────────────────────┘
-        │
-   ┌────▼─────────┐
-   │  PostgreSQL   │
-   │  + pgvector   │
-   └──────────────┘
-```
+NgIBL lets a teacher create an "experiment" — a subject, an AI context (source material), a simulation, and a worksheet (MCQ, short answer, long answer, fill-in-the-blank). Students open the experiment, interact with the simulation, and answer the worksheet with help from a RAG-backed AI tutor that is prompted to guide rather than give away answers. Teachers get AI-assisted question generation, per-student and class-wide answer analysis, and CSV export for gradebooks.
 
----
+The distinctive piece is the **simulation sandbox**: instead of hand-coding every STEM simulation, teachers describe what they want and a multi-agent pipeline generates working React or GeoGebra code, validates it, and repairs it automatically when it's wrong — so a non-technical teacher (and a lightweight/free-tier AI model) can still produce a working interactive simulation.
+
+## Multi-agent simulation generation
+
+Simulation code is produced by an orchestrated pipeline rather than a single model call (`src/lib/agents.ts`, `src/lib/ai-simulation.ts`):
+
+1. **Planner** — breaks the request into 3–7 implementation steps.
+2. **Code Generator** — produces React or GeoGebra code from the plan, using subject/engine-specific prompt templates and worked examples (`src/lib/template-packs`, `src/lib/model-provider-templates.ts`).
+3. **Validator** — checks the output locally (bracket matching, forbidden imports, JSON validity for GeoGebra) and via an AI semantic check.
+4. **Refiner** — feeds validator errors back to the model and retries, up to 3 attempts, before surfacing the failure.
+
+On top of that base loop:
+
+- **Auto-fix on preview errors**: if a generated simulation throws at runtime, the studio UI offers a one-click "Auto-Fix Error" action that re-runs the refiner against the actual runtime error.
+- **Checkpoints and version history**: every save/auto-fix can be checkpointed; simulations keep a version history (capped at 80 entries) that can be rolled back.
+- **Continuous iteration**: simulations can be forked, modified, and re-generated repeatedly rather than treated as one-shot output.
+- **Engine routing**: prompts and validation are engine-aware — supported engines include a sandboxed React runner, Matter.js (physics), JSXGraph (geometry), Kekule.js (chemistry), 3Dmol.js (molecular structures), and GeoGebra.
+- **Multi-provider AI**: Gemini, DeepSeek, Qwen/Tongyi, and other OpenAI-compatible providers, plus local models via Ollama — so the pipeline is not tied to a single paid API.
 
 ## Features
 
-### For Teachers
+### For teachers
 
-| Feature | Description |
-|---------|-------------|
-| **Experiment Builder** | Create experiments with title, subject, simulation, AI context, and worksheet questions (MCQ, Short Answer, Long Answer, Fill-in-the-Blank) |
-| **AI Question Generation** | One-click question generation using Gemini, DeepSeek, Qwen, or Ollama |
-| **AI-Powered Analysis** | Class-wide and per-student analysis of submitted answers with caching |
-| **Custom Simulations** | Write React or GeoGebra simulations in-browser with live preview |
-| **Multi-Agent Sim Generation** | Planner → Code Generator → Validator → Refiner pipeline with self-healing |
-| **Community Library** | Share simulations publicly, fork and modify others' work |
-| **CSV Export** | Export all student submission data for gradebook integration |
-| **QR Code Sharing** | Generate QR codes for students to access experiments |
+- Experiment builder: title, subject, simulation, AI context, and worksheet questions (MCQ, short answer, long answer, fill-in-the-blank)
+- One-click AI question generation from the experiment's context
+- Class-wide and per-student answer analysis, with caching
+- In-browser simulation builder (sandbox) with live preview, described above
+- Community library: publish simulations, fork and modify others' work
+- CSV export of student submissions
+- QR code generation for sharing an experiment with students
 
-### For Students
+### For students
 
-| Feature | Description |
-|---------|-------------|
-| **Interactive Simulations** | Manipulate physics, chemistry, and biology simulations with adjustable parameters |
-| **AI Tutor** | Context-aware chatbot using RAG—guides without giving away answers |
-| **Digital Worksheets** | Submit answers online with real-time validation |
-| **Image Upload** | Attach photos/diagrams to long-answer questions |
-| **Guest Access** | Preview experiments without account creation |
+- Interactive simulations with adjustable parameters
+- AI tutor chatbot that uses retrieval-augmented context from the teacher's material, prompted to guide rather than answer directly
+- Digital worksheets with image upload for long-answer questions
+- Guest access to preview experiments without an account
 
 ### Platform
 
-| Feature | Description |
-|---------|-------------|
-| **Bilingual UI** | English ↔ Traditional Chinese (繁體中文) toggle |
-| **Dark Mode** | System-aware with manual toggle |
-| **Per-Function Model Selection** | Choose different AI models for simulation, chatbot, and analysis tasks |
-| **RBAC** | Role hierarchy: Student → Teacher → Admin |
+- Bilingual UI: English / Traditional Chinese (繁體中文)
+- Dark mode (system-aware, manual toggle)
+- Per-function AI model selection (different models for simulation generation, chatbot, and analysis)
+- Role hierarchy: Student → Teacher → Admin (RBAC)
+- Platform adapter API (`/api/adapter/*`) for external system integration: SSO launch, user/class sync, entitlement checks, and event export
 
----
-
-## Tech Stack
+## Tech stack
 
 | Layer | Technology |
-|-------|-----------|
-| **Framework** | Next.js 16.1.6 (App Router, Turbopack, React 19) |
-| **Language** | TypeScript 5 |
-| **Database** | PostgreSQL + pgvector (via Prisma 6.19) |
-| **Auth** | NextAuth.js v5 (JWT, Credentials provider) |
-| **AI** | Google Gemini, DeepSeek, Qwen, Ollama (multi-provider) |
-| **RAG** | pgvector embeddings (768-dim), sentence-aware chunking |
-| **Cache** | Vercel KV (Redis-compatible, free tier) |
-| **Logging** | Pino (structured JSON in prod, pretty in dev) |
-| **Styling** | Tailwind CSS 4 + Shadcn/UI + Radix primitives |
-| **Charts** | Recharts 3.7 |
-| **Simulations** | react-runner (sandboxed React execution) |
-| **Testing** | Vitest + Testing Library |
-| **Deployment** | Vercel (Analytics + Speed Insights) |
-| **Validation** | Zod 4 |
+|---|---|
+| Framework | Next.js 16 (App Router, Turbopack, React 19) |
+| Language | TypeScript |
+| Database | PostgreSQL + pgvector, via Prisma |
+| Auth | NextAuth.js v5 (JWT, credentials provider) |
+| AI | Google Gemini, DeepSeek, Qwen, Ollama (multi-provider) |
+| RAG | pgvector embeddings, sentence-aware chunking |
+| Cache / rate limiting | Vercel KV (Redis-compatible) |
+| Logging | Pino (structured JSON in prod, pretty-printed in dev) |
+| Styling | Tailwind CSS + Shadcn/UI + Radix primitives |
+| Charts | Recharts |
+| Simulation sandbox | react-runner (sandboxed React execution) |
+| Testing | Vitest + Testing Library |
+| Deployment | Vercel |
 
----
+## Platform internals
 
-## Enterprise Infrastructure
+A few implementation details worth calling out for anyone reading the code:
 
-### Centralized Error Handling
+- **Typed error handling** — server actions and API routes go through `withErrorHandling()` / `withApiErrorHandling()`, which map a small hierarchy of typed errors (`UnauthorizedError`, `ForbiddenError`, `ValidationError`, `RateLimitError`, `AIProviderError`, ...) to consistent responses and sanitize error messages in production.
+- **Structured logging** — Pino-based logger with helpers for AI calls, DB queries, auth events, and rate-limit events; sensitive fields (API keys, passwords, tokens) are redacted.
+- **Caching** — Vercel KV with a 1-hour TTL for experiment/simulation/analysis data, invalidated on update/delete/new submission, with graceful fallback (no caching, not a hard failure) when KV isn't configured.
+- **Rate limiting** — sliding-window limits per action (e.g. chatbot messages, AI analysis, simulation generation, login attempts), also degrading gracefully when KV is unavailable.
+- **RBAC + audit log** — `requireAuth()` / `requireRole()` / `requireExperimentOwner()` / `requireSimulationOwner()` guards, with mutations logged to an `AuditLog` table.
+- **RAG pipeline** — sentence-aware chunking (400 tokens, 50-token overlap), multi-provider embeddings, pgvector cosine-similarity search, with a fallback to full-context concatenation if no embeddings exist yet.
 
-All server actions and API routes use typed error classes with consistent `ActionResult<T>` responses:
-
-```
-AppError (base)
-├── UnauthorizedError (401)
-├── ForbiddenError (403)
-├── NotFoundError (404)
-├── ValidationError (400)  — with optional field-level details
-├── RateLimitError (429)   — with retryAfter
-└── AIProviderError (502)  — with provider name
-```
-
-- `withErrorHandling()` wraps server actions → returns `{success, data} | {success: false, error}`
-- `withApiErrorHandling()` wraps API routes → returns proper HTTP Response objects
-- Production error messages are sanitized (no stack traces leak to clients)
-
-### Structured Logging
-
-Pino-based logging with automatic sensitive field redaction:
-
-```typescript
-logger.info({ experimentId }, 'Experiment created')
-logAI('chatbot', { provider: 'gemini', model: 'gemini-2.0-flash', duration: 1200 })
-logDB('query', { table: 'Experiment', duration: 45 })
-logAuth('login', { email, success: true })
-logRateLimit({ identifier: userId, action: 'chatbot', remaining: 15 })
-```
-
-- JSON format in production (Vercel log drain compatible)
-- Pretty-printed in development
-- Redacts: apiKey, password, token, secret, all provider keys
-
-### Caching (Vercel KV)
-
-Redis-compatible caching with graceful fallback when KV is not configured:
-
-| Cache Key Pattern | TTL | Used For |
-|---|---|---|
-| `analysis:class:{id}` | 1 hour | Class analysis results |
-| `analysis:student:{id}:{subId}` | 1 hour | Per-student analysis |
-| `experiment:{id}` | 1 hour | Experiment data |
-| `simulation:{id}` | 1 hour | Simulation data |
-| `user:settings:{id}` | 1 hour | User preferences |
-
-Cache invalidation triggers on experiment update, delete, and new submission.
-
-### Rate Limiting
-
-Sliding-window rate limiter via Vercel KV:
-
-| Action | Limit | Window |
-|--------|-------|--------|
-| Chatbot messages | 20 | 1 min |
-| AI Analysis | 5 | 5 min |
-| Simulation generation | 10 | 10 min |
-| Login attempts | 5 | 15 min |
-| Registration | 3 | 1 hour |
-| API requests | 100 | 1 min |
-
-Graceful degradation: allows all requests when KV is unavailable.
-
-### RBAC & Audit Logging
-
-Role hierarchy with cumulative permissions:
-
-```
-STUDENT (0) → TEACHER (1) → ADMIN (2)
-```
-
-Guards: `requireAuth()`, `requireRole()`, `requireExperimentOwner()`, `requireSimulationOwner()`
-
-All mutations log to `AuditLog` table (fire-and-forget, non-blocking).
-
-### RAG Pipeline
-
-Replaces naive context concatenation with semantic retrieval:
-
-1. **Chunk** — Sentence-aware splitting (400 tokens, 50-token overlap)
-2. **Embed** — Multi-provider embeddings (Gemini `text-embedding-004` free, DeepSeek, Ollama)
-3. **Store** — pgvector `vector(768)` columns in PostgreSQL
-4. **Search** — Cosine similarity via `<=>` operator, configurable min similarity threshold
-5. **Fallback** — If no embeddings exist, uses full context string (backward compatible)
-
-### Multi-Agent Simulation Generation
-
-Self-healing pipeline for generating simulation code:
-
-```
-Planner → Code Generator → Validator → Refiner (up to 3 attempts)
-```
-
-- **Planner**: Breaks prompt into 3-7 implementation steps
-- **Code Generator**: Produces React/GeoGebra code from plan
-- **Validator**: Local syntax check (bracket matching, forbidden imports) + AI semantic validation
-- **Refiner**: Fixes errors found by validator, resubmits to validator
-
----
-
-## Database Schema
+## Database schema
 
 ```
 User ──────┬──→ Experiment ──┬──→ WorksheetQuestion
   │        │       │         └──→ StudentSubmission ──→ Answer
   │        │       └──→ Embedding (pgvector)
-  │        └──→ Simulation (forks via parentId)
+  │        └──→ Simulation (forks via parentId, version history)
   └──→ AuditLog
 ```
 
-**Key models**: User (with multi-provider AI config), Experiment (with AI context + simulation), Simulation (React/GeoGebra with community features), Embedding (768-dim vectors), AuditLog.
+Key models: `User` (multi-provider AI config), `Experiment` (AI context + simulation), `Simulation` (React/GeoGebra, with community/fork fields), `Embedding` (vector columns for RAG), `AuditLog`.
 
-Comprehensive indexes on all models for query performance.
-
----
-
-## Getting Started
+## Getting started
 
 ### Prerequisites
 
 - Node.js 18+
-- PostgreSQL with pgvector extension
+- PostgreSQL with the `pgvector` extension enabled
 - (Optional) Vercel KV for caching and rate limiting
-- At least one AI provider API key (Gemini recommended—free tier)
+- At least one AI provider API key (Gemini has a usable free tier), or a local Ollama install
 
 ### Installation
 
@@ -228,7 +116,7 @@ cd NgIBL
 npm install
 ```
 
-### Environment Variables
+### Environment variables
 
 Create a `.env` file:
 
@@ -241,116 +129,110 @@ AUTH_SECRET="generate-with-openssl-rand-base64-32"
 KV_REST_API_URL="..."
 KV_REST_API_TOKEN="..."
 
-# Optional — AI providers (configure per-user in Settings)
+# Optional — AI providers (can also be configured per-user in Settings)
 GEMINI_API_KEY="..."
 DEEPSEEK_API_KEY="..."
 
-# Optional — Logging
+# Optional — logging
 LOG_LEVEL="debug"  # debug | info | warn | error
 ```
 
-### Database Setup
+### Database setup
 
 ```bash
 npx prisma generate
 npx prisma db push
 ```
 
-> **Note**: pgvector extension must be enabled on your PostgreSQL instance for RAG embeddings. On Vercel Postgres, it's available by default.
+`pgvector` must be enabled on the target PostgreSQL instance for RAG embeddings to work.
 
 ### Development
 
 ```bash
-npm run dev        # Start dev server (Turbopack)
-npm run test       # Run tests (watch mode)
-npm run test:run   # Run tests once
-npm run lint       # ESLint
+npm run dev        # start dev server (Turbopack)
+npm run test        # run tests (watch mode)
+npm run test:run    # run tests once
+npm run lint         # ESLint
 ```
 
-### Production Build
+### Production build
 
 ```bash
-npm run build      # prisma db push + next build
-npm start          # Start production server
+npm run build   # prisma db push + next build
+npm start        # start production server
 ```
 
 ### Deployment (Vercel)
 
-1. Connect repo to Vercel
-2. Set environment variables in Vercel dashboard
-3. Enable Vercel KV addon (free tier: 30k requests/month)
-4. Deploy — `prisma db push` runs automatically in build script
+1. Connect the repo to Vercel.
+2. Set environment variables in the Vercel dashboard.
+3. (Optional) Enable the Vercel KV add-on for caching and rate limiting.
+4. Deploy — `prisma db push` runs automatically as part of the build script.
 
-Function timeouts are configured to 60s in `vercel.json` for AI-heavy routes.
-
----
-
-## Project Structure
-
-```
-src/
-├── app/                        # Next.js App Router
-│   ├── api/                    # API routes (experiments CRUD, auth, upload)
-│   ├── dashboard/              # Teacher dashboard (CRUD, settings, results)
-│   ├── experiment/[slug]/      # Student experiment view + chatbot
-│   ├── sandbox/                # Simulation builder + community
-│   ├── login/ & register/      # Auth pages
-│   └── layout.tsx              # Root layout (analytics, themes, i18n)
-├── components/
-│   ├── simulations/            # Built-in sims (Cell, Chemistry, Friction)
-│   ├── ui/                     # Shadcn/UI components
-│   ├── student-chatbot.tsx     # AI tutor interface
-│   ├── simulation-runner.tsx   # Sandboxed React runner
-│   └── export-button.tsx       # CSV export
-├── lib/
-│   ├── ai.ts                   # Multi-provider AI abstraction
-│   ├── agents.ts               # Multi-agent simulation pipeline
-│   ├── auth-guards.ts          # RBAC + audit logging
-│   ├── cache.ts                # Vercel KV caching
-│   ├── error-handler.ts        # Typed error classes + wrappers
-│   ├── logger.ts               # Pino structured logging
-│   ├── prisma.ts               # Database client (connection pooling)
-│   ├── rag.ts                  # RAG pipeline (chunk, embed, search)
-│   ├── rate-limit.ts           # Sliding-window rate limiter
-│   ├── dictionary.ts           # i18n dictionaries (en/zh-TW)
-│   └── utils.ts                # Shared utilities
-├── __tests__/                  # Vitest test suites
-└── middleware.ts               # Auth middleware
-```
-
----
+`vercel.json` sets a 60-second function timeout on the AI-heavy API routes and server actions.
 
 ## Testing
 
 ```bash
-npm run test           # Watch mode
-npm run test:run       # Single run
-npm run test:coverage  # With coverage report
+npm run test           # watch mode
+npm run test:run        # single run
+npm run test:coverage    # with coverage report
 ```
 
-Coverage targets `src/lib/**/*.ts` and `src/app/**/actions.ts`.
+Current test suites (`src/__tests__/`) cover the typed error handler, the RAG chunking logic (`chunkText` edge cases), and cache key generation.
 
-Current test suites:
-- Error handler — custom error classes, `withErrorHandling` wrapper
-- RAG — `chunkText` edge cases (empty input, splitting, overlap, size limits)
-- Cache — `CacheKeys` generation
-
----
-
-## API Routes
+## API routes
 
 | Method | Route | Description |
-|--------|-------|-------------|
-| GET | `/api/experiments` | List published experiments |
-| POST | `/api/experiments` | Create experiment (authenticated) |
-| PATCH | `/api/experiments/[id]` | Update experiment |
-| DELETE | `/api/experiments/[id]` | Delete experiment |
-| POST | `/api/experiments/[id]/submit` | Submit student answers |
+|---|---|---|
+| POST | `/api/experiments` | Create an experiment (authenticated) |
+| PATCH | `/api/experiments/[id]` | Update an experiment |
+| DELETE | `/api/experiments/[id]` | Delete an experiment |
+| POST | `/api/experiments/[id]/submit` | Submit student worksheet answers |
+| POST | `/api/upload` | File upload |
+| * | `/api/auth/[...nextauth]` | NextAuth.js handlers |
+| GET | `/api/adapter/health` | Adapter health check |
+| POST | `/api/adapter/users/sync` | Sync users from an external platform |
+| POST | `/api/adapter/classes/sync` | Sync classes from an external platform |
+| POST | `/api/adapter/sso/launch` | Single sign-on launch |
+| POST | `/api/adapter/entitlements/apply` | Apply subscription/entitlement state |
+| GET | `/api/adapter/students/[globalUserId]/summary` | Per-student summary for an external platform |
+| POST | `/api/adapter/events/export` | Export learning events |
 
-All routes use `withApiErrorHandling` for consistent error responses and structured logging. Mutations include audit logging and cache invalidation.
+Most other reads (experiment/simulation listings, dashboards) go through server components and server actions rather than REST endpoints.
 
----
+## Project structure
 
-## License
-
-MIT
+```
+src/
+├── app/                        # Next.js App Router
+│   ├── api/                    # API routes (experiments, adapter, auth, upload)
+│   ├── dashboard/               # Teacher dashboard (CRUD, settings, results)
+│   ├── experiment/[slug]/       # Student experiment view + chatbot
+│   ├── sandbox/                 # Simulation builder + community
+│   ├── login/ & register/       # Auth pages
+│   └── layout.tsx               # Root layout (analytics, themes, i18n)
+├── components/
+│   ├── simulations/              # Built-in simulations (cell, chemistry, friction, ...)
+│   ├── ui/                        # Shadcn/UI components
+│   ├── student-chatbot.tsx        # AI tutor interface
+│   ├── simulation-runner.tsx       # Sandboxed simulation runner
+│   └── export-button.tsx           # CSV export
+├── lib/
+│   ├── ai.ts                     # Multi-provider AI abstraction
+│   ├── agents.ts                  # Multi-agent simulation pipeline
+│   ├── ai-simulation.ts            # Simulation prompts, examples, auto-fix
+│   ├── engine-scoring.ts            # Simulation engine routing
+│   ├── template-packs/               # Subject/engine prompt templates
+│   ├── auth-guards.ts                # RBAC + audit logging
+│   ├── cache.ts                       # Vercel KV caching
+│   ├── error-handler.ts                # Typed error classes + wrappers
+│   ├── logger.ts                        # Pino structured logging
+│   ├── prisma.ts                         # Database client
+│   ├── rag.ts                             # RAG pipeline (chunk, embed, search)
+│   ├── rate-limit.ts                       # Sliding-window rate limiter
+│   ├── dictionary.ts                        # i18n dictionaries (en/zh-TW)
+│   └── utils.ts                              # Shared utilities
+├── __tests__/                  # Vitest test suites
+└── middleware.ts                # Auth middleware
+```
